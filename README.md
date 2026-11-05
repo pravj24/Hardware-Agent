@@ -8,6 +8,15 @@ This repository is a runnable reference implementation of the Hardware Overwatch
 
 ## Run the operations desk
 
+For the **integrated hackathon demo**, run `bash scripts/run-hackathon.sh`, open
+**http://127.0.0.1:8080**, and click **Enter hackathon demo**. All seven onboarding
+phases connect to a three-node Redfish lab, case recommendations, mock maintenance
+requests, bid comparison, an assistant, recovery checks and evidence export. Enterprise
+services, owners and historical data are fictional. No external credentials are needed.
+See the [complete presentation guide](docs/hackathon-demo.md).
+
+The commands below run the original manual operations lab without the guided demo.
+
 Requires Python 3.11 or newer. The application and default tests use only the Python standard library; no API key or package installation is needed.
 
 ```powershell
@@ -32,7 +41,20 @@ For a quick UI demonstration, start with `python -m overwatch demo --soak-second
 
 Try **Lost action response** to exercise `RECONCILING`, or **Stale telemetry** to see verification refuse the plan. Switch to the `policy_admin` token to halt execution. Use the `procurement` token in Tenders to compare the provided sample bids. The role comes from the token configuration, never from a request body.
 
-## Test-driven implementation
+## Onboarding rehearsal
+
+The desk now includes **Onboarding** with seven setup requests, owner sign-offs,
+site/device reconciliation, a local Redfish privilege probe, readiness gates and T0
+shadow mode. Start with the `policy_admin` token; the generated credentials also
+include the gate owner roles. Load the explicitly labeled simulation configuration
+to walk through the gates. Starting onboarding locks that database to recommendations
+and disables action permits/execution; use separate data directories for the action lab.
+
+This does not connect enterprise SSO, vaults, external systems or AI clients. Imported
+coverage and integration checks are fixture assertions; production readiness remains
+blocked. See [phase-by-phase status and walkthrough](docs/onboarding-status.md).
+
+## Verification commands
 
 ```powershell
 python -m unittest discover -s tests -v

@@ -2,6 +2,20 @@
 
 ## Implemented and testable
 
+**Hackathon mode:** `--hackathon` adds a complete guided onboarding-to-operations
+journey with fictional enterprise adapters and people, three Redfish nodes,
+maintenance/notice drafts, bid comparisons, read/propose assistant, simulated
+technician recovery, export and offboarding. See [demo guide](hackathon-demo.md).
+Mock enrollment, certificate rotation and gateway contracts have executable rejection
+checks; they do not establish real mTLS, OAuth or external app integration.
+
+**Onboarding update:** the operations desk now implements a local seven-phase
+onboarding rehearsal, with durable owner requests, configuration-bound gate sign-offs,
+a read-only lab probe, readiness blockers and service-enforced T0 shadow behavior.
+This is not enterprise onboarding certification. See the detailed
+[onboarding requirement coverage](onboarding-status.md) for what is operational,
+what is fixture-only, and what remains unimplemented.
+
 | Area | Current behavior |
 |---|---|
 | Collection | Redfish service discovery, Systems/Chassis links, legacy Thermal and temperature Sensors, bounded pagination, timestamp provenance, same-origin link checks, verified production TLS |

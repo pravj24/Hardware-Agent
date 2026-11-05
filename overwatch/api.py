@@ -15,13 +15,17 @@ from .errors import Rejected
 from .redfish import RedfishError
 from .service import new_id
 from .tender import compare_bids
+from .onboarding import Onboarding
+from .hackathon import Hackathon
 
 
 class APIServer:
-    def __init__(self, app, collector, *, identities, host="127.0.0.1", port=8080):
+    def __init__(self, app, collector, *, identities, host="127.0.0.1", port=8080, hackathon=False):
         if host not in {"127.0.0.1", "localhost"}:
             raise ValueError("development API must bind to loopback")
         self.app, self.collector, self.identities = app, collector, identities
+        self.onboarding = Onboarding(app, collector)
+        self.demo = Hackathon(app, collector, enabled=hackathon)
         self.thread = None
         api = self
         static = Path(__file__).parent / "web"
@@ -67,12 +71,16 @@ class APIServer:
                 route = urlsplit(self.path).path
                 assets = {"/": ("index.html", "text/html; charset=utf-8"),
                           "/app.js": ("app.js", "text/javascript; charset=utf-8"),
+                          "/onboarding.js": ("onboarding.js", "text/javascript; charset=utf-8"),
+                          "/hackathon.js": ("hackathon.js", "text/javascript; charset=utf-8"),
                           "/style.css": ("style.css", "text/css; charset=utf-8")}
                 if route in assets:
                     filename, kind = assets[route]
                     return self.send(200, (static / filename).read_bytes(), kind)
                 if route == "/healthz":
                     return self.send(200, {"status": "ok", "environment": app.environment})
+                if route == "/api/demo/config":
+                    return self.send(200, {"enabled": api.demo.enabled})
                 identity = self.identity()
                 if not identity:
                     return self.send(401, {"error": "valid bearer token required"})
@@ -86,6 +94,14 @@ class APIServer:
                     return self.send(200, state)
                 if route == "/api/events":
                     return self.send(200, app.store.events())
+                if route == "/api/onboarding":
+                    return self.send(200, api.onboarding.snapshot())
+                if route == "/api/demo/status" and api.demo.enabled:
+                    return self.send(200, api.demo.status())
+                if route == "/api/demo/export" and api.demo.enabled:
+                    if identity["role"] != "policy_admin":
+                        return self.send(403, {"error": "demo presenter required"})
+                    return self.send(200, api.demo.export(identity))
                 return self.send(404, {"error": "route not found"})
 
             def do_POST(self):
@@ -102,6 +118,14 @@ class APIServer:
                     return self.send(400, {"error": "invalid request body"})
                 if not self.boundary():
                     return self.send(403, {"error": "origin or host rejected"})
+                # Explicit loopback hackathon mode only. Never available in normal mode.
+                if urlsplit(self.path).path == "/api/demo/login":
+                    if not api.demo.enabled:
+                        return self.send(404, {"error": "hackathon mode disabled"})
+                    presenter = next((key for key, value in api.identities.items() if value["role"] == "policy_admin"), None)
+                    if not presenter:
+                        return self.send(503, {"error": "demo presenter unavailable"})
+                    return self.send(200, {"token": presenter, "mode": "fictional hackathon presenter"})
                 identity = self.identity()
                 if not identity:
                     return self.send(401, {"error": "valid bearer token required"})
@@ -112,7 +136,19 @@ class APIServer:
                     "/api/approve": {"operator", "procurement", "finance"},
                     "/api/permit": {"operator", "procurement"}, "/api/execute": {"operator", "procurement"},
                     "/api/reconcile": {"operator", "procurement"}, "/api/controls": {"policy_admin"},
-                    "/api/tender/compare": {"procurement"}}
+                    "/api/tender/compare": {"procurement"},
+                    "/api/onboarding/start": {"policy_admin"},
+                    "/api/onboarding/sample": {"policy_admin"},
+                    "/api/onboarding/configure": {"policy_admin"},
+                    "/api/onboarding/probe": {"operator", "security_lead"},
+                    "/api/onboarding/sign": {"iam_lead", "infrastructure_lead", "operator", "security_lead",
+                                             "risk_lead", "ai_owner", "maintenance_lead", "change_lead", "collaboration_lead"},
+                    "/api/onboarding/accept": {"iam_lead", "infrastructure_lead", "operator", "security_lead",
+                                               "risk_lead", "ai_owner", "maintenance_lead", "change_lead", "collaboration_lead"},
+                    "/api/onboarding/shadow": {"risk_lead"}}
+                if api.demo.enabled:
+                    permissions.update({"/api/demo/" + action: {"policy_admin"} for action in
+                                        ["prepare", "step", "refresh", "incident", "draft", "tender", "assistant", "recover", "offboard", "restart"]})
                 if route not in permissions:
                     return self.send(404, {"error": "route not found"})
                 if identity["role"] not in permissions[route]:
@@ -136,11 +172,45 @@ class APIServer:
 
     def dispatch(self, route, body, identity):
         app = self.app
+        if route.startswith("/api/demo/"):
+            action = route.rsplit("/", 1)[-1]
+            if action == "prepare":
+                return self.demo.prepare(identity, body.get("name", "Aster Cloud"), body.get("region", "India"))
+            if action == "step":
+                return self.demo.step(identity, body["step"])
+            if action == "draft":
+                return self.demo.draft(identity, body["case_id"])
+            if action == "assistant":
+                return self.demo.assistant(identity, body["question"])
+            if action in {"refresh", "incident", "tender", "recover", "offboard", "restart"}:
+                return getattr(self.demo, action)(identity)
+        if route == "/api/onboarding/start":
+            return self.onboarding.start(identity)
+        if route == "/api/onboarding/sample":
+            return self.onboarding.configure(identity, sample=True)
+        if route == "/api/onboarding/configure":
+            return self.onboarding.configure(identity, section=body["section"], value=body["value"], revision=body["revision"])
+        if route == "/api/onboarding/probe":
+            return self.onboarding.probe(identity)
+        if route == "/api/onboarding/sign":
+            return self.onboarding.sign(identity, body["gate"], body["revision"])
+        if route == "/api/onboarding/accept":
+            return self.onboarding.accept(identity, body["request_id"])
+        if route == "/api/onboarding/shadow":
+            return self.onboarding.shadow(identity)
         if route == "/api/scenario":
             if app.environment != "simulation":
                 raise Rejected("scenario control is simulation-only")
             return self.collector.request("POST", "/lab/scenario", {"scenario": body["scenario"]})
         if route == "/api/collect":
+            setup = app.store.read("onboarding", "setup")
+            if setup:
+                gates, _ = self.onboarding._gates(setup)
+                if not self.onboarding._identity_signed(setup) or next(g for g in gates if g["id"] == "inventory")["status"] != "passed":
+                    raise Rejected("sign identity and reconcile/sign inventory before monitoring; use the onboarding probe first")
+                probe = setup.get("probe") or {}
+                if not probe.get("read_only") or not 0 <= app.clock() - probe.get("at", 0) <= 300:
+                    raise Rejected("fresh read-only onboarding probe required before monitoring")
             try:
                 readings = self.collector.collect()
             except RedfishError as exc:
@@ -151,6 +221,8 @@ class APIServer:
                 raise
             cases = []
             for reading in readings:
+                if setup and reading["asset_id"] not in {d["serial"] for d in setup["config"]["inventory"]["devices"]}:
+                    raise Rejected("undeclared asset quarantined from monitoring")
                 case = app.observe(**reading)
                 if case:
                     cases.append(case)

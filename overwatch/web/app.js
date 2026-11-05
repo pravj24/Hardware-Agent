@@ -32,6 +32,8 @@ async function refresh() {
     $("admin-controls").hidden=state.identity.role!=="policy_admin";
     if(!selected && state.cases.length) selected=state.cases[state.cases.length-1].id;
     renderCases(); renderEvidence(); renderTenders();
+    renderOnboarding(await api("/api/onboarding"));
+    if (typeof demoEnabled !== "undefined" && demoEnabled) renderHackathon(await api("/api/demo/status"));
   } catch(error) { message(error.message,true); }
 }
 function renderCases() {
@@ -47,11 +49,12 @@ function renderCases() {
   const btn=(label,action,id,primary=false)=>`<button ${primary?'class="primary"':''} data-action="${action}" data-id="${esc(id)}">${label}</button>`;
   if(["DETECTED","HELD","ESCALATED"].includes(c.state)) buttons+=btn("Prepare repair plan","plan",c.id,true);
   if(plan?.status==="DRAFT") buttons+=btn("Verify evidence","verify",plan.id,true);
-  if(c.state==="AWAITING_APPROVAL") {
+  if(c.state==="AWAITING_APPROVAL" && !state.onboarding_active) {
     if(!approvals.some(a=>a.actor===state.identity.actor)) buttons+=btn("Approve this plan","approve",plan.id,true);
     if(!permit) buttons+=btn("Request permit","permit",plan.id);
     if(permit) buttons+=btn("Execute permitted action","execute",permit.id,true);
   }
+  if(state.onboarding_active) buttons+='<p class="muted">Onboarding / shadow mode: recommendations only (T0). Action permits and execution are disabled.</p>';
   if(c.state==="RECONCILING"||c.state==="EXECUTING") buttons+=btn("Reconcile outcome","reconcile",job?.id,true);
   if(c.state==="POST_CHECK") buttons+='<p class="muted">Action accepted. Set the recovered scenario and collect at least three fresh readings across the configured soak period (60 seconds by default).</p>';
   $("case-detail").innerHTML=`<div class="section-title"><h2>${esc(c.asset_id)}</h2><span class="badge">${esc(c.state.replaceAll("_"," "))}</span></div><div class="detail-body"><div class="steps">${steps.map((s,i)=>`<span class="${i<=steps.indexOf(c.state)?"done":""}">${s.replaceAll("_"," ")}</span>`).join("")}</div><p>Thermal threshold observation. Component failure is not established; inspect cooling, airflow and workload before maintenance.</p><div class="detail-label">LATEST EVIDENCE</div><div class="detail-value">${latest?`${esc(latest.body.temperature)} °C · ${esc(date(latest.body.observed_at))}`:"No readings"}</div><small>${latest?`${esc(latest.body.timestamp_basis)} timestamp · receipt ${short(latest.id)}`:""}</small><div class="detail-label">PLAN</div><div class="detail-value">${plan?`${esc(plan.action)} · ${esc(plan.currency)} ${esc(plan.amount)}`:"Not prepared"}</div>${plan?`<small>Approved scope hash</small><div class="detail-value"><code>${esc(plan.hash)}</code></div>`:""}<div class="detail-label">APPROVALS</div><div class="detail-value">${approvals.map(a=>`${esc(a.actor)} (${esc(a.role)})`).join(", ")||"No approvals recorded"}</div><div class="detail-label">RECOVERY</div><div class="detail-value">${c.healthy_samples} qualifying samples${c.state==="CLOSED"?" · outcome verified":""}</div><div class="actions">${buttons}</div></div>`;
@@ -75,4 +78,4 @@ $("kill-off").addEventListener("click",()=>act("/api/controls",{kill_switch:fals
 $("sample-bids").addEventListener("click",()=>{$("bids").value=JSON.stringify(["Regional Service Co","OEM Service","Unverified Lead"].map((supplier,i)=>({supplier,unit_price:["100.10","130.00","50.00"][i],quantity:3,freight:"10.00",tax:"5.00",currency:"USD",qualified:i<2,screened:true,evidence_id:`simulation-bid-${i+1}`,availability_confirmed:i<2,expires_at:Math.floor(Date.now()/1000)+86400})),null,2);});
 $("compare-bids").addEventListener("click",()=>{try{act("/api/tender/compare",{currency:"USD",bids:JSON.parse($("bids").value)},"Bid comparison saved as draft.");}catch(error){message(error.message,true);}});
 $("load-audit").addEventListener("click",async()=>{try{const events=await api("/api/events");$("audit-list").innerHTML=events.reverse().slice(0,200).map(event=>`<div class="record"><strong>#${event.seq} · ${esc(event.kind)}</strong><p>${esc(date(event.at))}</p><code>${esc(event.hash)}</code><details><summary>Event payload</summary><pre>${esc(JSON.stringify(event.payload,null,2))}</pre></details></div>`).join("");}catch(error){message(error.message,true);}});
-refresh();
+window.addEventListener("DOMContentLoaded",refresh);

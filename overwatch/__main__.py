@@ -13,6 +13,7 @@ from .redfish import RedfishClient, SimulationAdapter
 from .service import Overwatch
 from .simulator import LabServer
 from .store import Store
+from .onboarding import ROLES
 
 
 def write_private(path, content):
@@ -31,7 +32,14 @@ def credentials(directory):
     if not token_file.exists():
         write_private(token_file, json.dumps({role: secrets.token_urlsafe(32) for role in
                       ["operator", "procurement", "finance", "policy_admin", "viewer", "lab"]}, indent=2))
-    return bytes.fromhex(key_file.read_text().strip()), json.loads(token_file.read_text()), token_file
+    tokens = json.loads(token_file.read_text())
+    missing = [role for role in ROLES if role not in tokens]
+    if missing:
+        tokens.update({role: secrets.token_urlsafe(32) for role in missing})
+        replacement = token_file.with_suffix(".new")
+        write_private(replacement, json.dumps(tokens, indent=2))
+        replacement.replace(token_file)
+    return bytes.fromhex(key_file.read_text().strip()), tokens, token_file
 
 
 def main():
@@ -42,6 +50,7 @@ def main():
     demo.add_argument("--lab-port", type=int, default=8001)
     demo.add_argument("--data", type=Path, default=Path("data"))
     demo.add_argument("--soak-seconds", type=int, default=60)
+    demo.add_argument("--hackathon", action="store_true", help="Enable the guided fictional enterprise demo, three Redfish nodes and instant demo login")
     mock = sub.add_parser("lab", help="Run the standalone stateful Redfish lab")
     mock.add_argument("--port", type=int, default=8001)
     mock.add_argument("--data", type=Path, default=Path("data"))
@@ -76,20 +85,23 @@ def main():
         print(json.dumps({"cases": cases, "environment": args.environment}, indent=2))
         return 0
     lab_port = args.lab_port if args.command == "demo" else args.port
-    lab = LabServer(port=lab_port, token=tokens["lab"]).start()
+    hackathon = args.command == "demo" and args.hackathon
+    lab = LabServer(port=lab_port, token=tokens["lab"], fleet_size=3 if hackathon else 1).start()
     api = None
     try:
         print(f"Redfish simulation: {lab.url}", flush=True)
         print(f"Local credentials: {token_file.resolve()} (never commit this file)", flush=True)
         if args.command == "demo":
             client = RedfishClient(lab.url, lab_token=tokens["lab"])
-            app = Overwatch(args.data / "overwatch.db", key, adapter=SimulationAdapter(client), soak_seconds=args.soak_seconds)
+            app = Overwatch(args.data / "overwatch.db", key, adapter=SimulationAdapter(client), soak_seconds=0 if hackathon else args.soak_seconds)
             identities = {value: {"actor": role + "-local", "role": role} for role, value in tokens.items() if role != "lab"}
             # In-flight actions survive application restarts; simulator restarts do not recreate lost remote outcomes.
             app.recover_inflight()
-            api = APIServer(app, client, identities=identities, port=args.port).start()
+            api = APIServer(app, client, identities=identities, port=args.port, hackathon=hackathon).start()
             print(f"Operations desk: {api.url}", flush=True)
             print("Open the desk and paste the operator token. Ctrl+C stops both services.", flush=True)
+            if hackathon:
+                print("HACKATHON: use Enter hackathon demo; all enterprise people/data are fictional. Recovery uses three samples with a zero-second soak.", flush=True)
         while True:
             time.sleep(0.5)
     except KeyboardInterrupt:

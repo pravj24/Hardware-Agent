@@ -70,6 +70,17 @@ class Overwatch:
         require(isinstance(source, str) and source and isinstance(event_id, str) and event_id, "missing source/event ID")
         event_key = digest([source, event_id, asset_id])
         with self.store.transaction() as tx:
+            setup = tx.get("onboarding", "setup")
+            if setup:
+                from .onboarding import Onboarding
+                gates, inventory = Onboarding(self)._gates(setup)
+                require(all(g["status"] == "passed" for g in gates if g["id"] in {"identity", "inventory"}),
+                        "onboarding identity and inventory sign-offs required before monitoring")
+                probe = setup.get("probe") or {}
+                require(probe.get("read_only") and 0 <= now - probe.get("at", 0) <= 300,
+                        "fresh read-only onboarding probe required before monitoring")
+                require(source == probe.get("source") and any(r["serial"] == asset_id and r["status"] == "matched" for r in inventory),
+                        "undeclared asset or source quarantined from monitoring")
             seen = tx.get("ingested", event_key)
             if seen:
                 return tx.get("cases", seen["case_id"]) if seen["case_id"] else None
@@ -205,6 +216,7 @@ class Overwatch:
     def issue_permit(self, plan_id):
         def operation():
             with self.store.transaction() as tx:
+                require(not tx.get("onboarding", "setup"), "onboarding and shadow mode are T0: action permits are disabled")
                 plan = require(tx.get("plans", plan_id), "plan not found")
                 require(plan["status"] == "VERIFIED", "verified plan required")
                 case = self._verify(tx, plan)
@@ -238,6 +250,7 @@ class Overwatch:
         def operation():
             check_signature(permit, self.key)
             with self.store.transaction() as tx:
+                require(not tx.get("onboarding", "setup"), "onboarding and shadow mode are T0: execution is disabled")
                 stored = require(tx.get("permits", permit["payload"]["id"]), "unknown permit")
                 require(stored["payload"] == permit["payload"] and stored["signature"] == permit["signature"], "permit mismatch")
                 require(stored["status"] == "issued", "permit already consumed or revoked")
@@ -326,6 +339,7 @@ class Overwatch:
         with self.store.transaction() as tx:
             result = {kind: tx.all(kind) for kind in ["cases", "plans", "receipts", "approvals", "permits", "operations", "tenders"]}
             result["policy"] = tx.get("settings", "policy")
+            result["onboarding_active"] = bool(tx.get("onboarding", "setup"))
         result["ledger_valid"] = self.store.verify_ledger()
         result["environment"] = self.environment
         return result

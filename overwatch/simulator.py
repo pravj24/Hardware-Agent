@@ -4,6 +4,7 @@ This is deliberately a small scenario simulator, not a Redfish conformance emula
 Action acceptance never implies recovery: the scenario controller supplies readings.
 """
 from datetime import datetime, timezone
+import copy
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import hmac
 import json
@@ -12,7 +13,10 @@ import time
 
 
 class LabServer:
-    def __init__(self, host="127.0.0.1", port=0, token=None):
+    def __init__(self, host="127.0.0.1", port=0, token=None, fleet_size=1):
+        if fleet_size not in {1, 3}:
+            raise ValueError("supported lab fleet sizes are one or three")
+        self.fleet_size = fleet_size
         self.scenario = "healthy"
         self.token = token
         self.lock = threading.RLock()
@@ -94,7 +98,9 @@ class LabServer:
             return {"@odata.id": path}
         ts = datetime.fromtimestamp(time.time() - (900 if self.scenario == "stale" else 0), timezone.utc).isoformat()
         temp = 45 if self.scenario in {"healthy", "recovered"} else 91
-        return {
+        resources = {
+            "/redfish/v1/AccountService/Accounts/overwatch-reader": {"Id": "overwatch-reader", "RoleId": "ReadOnly"},
+            "/redfish/v1/AccountService/Roles/ReadOnly": {"Id": "ReadOnly", "AssignedPrivileges": ["Login", "ConfigureSelf"], "OemPrivileges": []},
             "/redfish/v1": {"@odata.type": "#ServiceRoot.v1_15_0.ServiceRoot", "Id": "RootService",
                             "RedfishVersion": "1.15.0", "Systems": ref("/redfish/v1/Systems"),
                             "Chassis": ref("/redfish/v1/Chassis")},
@@ -108,6 +114,18 @@ class LabServer:
                 {"MemberId": "inlet", "Name": "Inlet temperature", "ReadingCelsius": temp,
                  "ReadingTime": ts, "Status": {"Health": "OK" if temp < 80 else "Critical"}}]}
         }
+        for i, letter in enumerate("bc", 2):
+            if self.fleet_size == 1:
+                break
+            system_path, chassis_path = "/redfish/v1/Systems/node-" + letter, "/redfish/v1/Chassis/chassis-" + letter
+            resources["/redfish/v1/Systems"]["Members"].append(ref(system_path))
+            resources["/redfish/v1/Systems"]["Members@odata.count"] = self.fleet_size
+            resources["/redfish/v1/Chassis"]["Members"].append(ref(chassis_path))
+            resources[system_path] = {"Id": "node-" + letter, "SerialNumber": f"LAB-SERVER-{i:03d}",
+                                      "Manufacturer": "WatcherMCP lab", "PowerState": "On", "Links": {"Chassis": [ref(chassis_path)]}}
+            resources[chassis_path] = {"Id": "chassis-" + letter, "Thermal": ref(chassis_path + "/Thermal")}
+            resources[chassis_path + "/Thermal"] = copy.deepcopy(resources["/redfish/v1/Chassis/chassis-a/Thermal"])
+        return resources
 
     def start(self):
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
