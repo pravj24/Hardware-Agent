@@ -1,0 +1,1924 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WatcherMCP — Hardware Overwatch NOC &amp; Agent Operations Desk</title>
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-base: #090d14;
+      --bg-panel: #111722;
+      --bg-card: #161f2e;
+      --border-dim: #1f2b3e;
+      --text-main: #e2e8f0;
+      --text-muted: #8b9bb4;
+      --green-ok: #10b981;
+      --red-crit: #ef4444;
+      --amber-warn: #f59e0b;
+      --purple-maint: #8b5cf6;
+      --cyan-accent: #0ea5e9;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background-color: var(--bg-base);
+      color: var(--text-main);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      overflow-x: hidden;
+    }
+    .font-mono-num {
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .noc-panel {
+      background: var(--bg-panel);
+      border: 1px solid var(--border-dim);
+      border-radius: 6px;
+    }
+    .noc-card {
+      background: var(--bg-card);
+      border: 1px solid #243247;
+      border-radius: 5px;
+    }
+    /* 16x16 Monitor Pixel Matrix */
+    .monitor-grid {
+      display: grid;
+      grid-template-columns: repeat(16, minmax(0, 1fr));
+      gap: 3px;
+    }
+    .monitor-cell {
+      aspect-ratio: 1 / 1;
+      border-radius: 2px;
+      cursor: pointer;
+      transition: transform 0.12s ease, box-shadow 0.12s ease;
+    }
+    .monitor-cell:hover {
+      transform: scale(1.35);
+      z-index: 10;
+      box-shadow: 0 0 8px rgba(255, 255, 255, 0.7);
+    }
+    .monitor-cell.selected-cell {
+      outline: 2px solid #ffffff;
+      outline-offset: 1px;
+      z-index: 9;
+    }
+    .cell-ok { background-color: #10b981; }
+    .cell-down { background-color: #ef4444; }
+    .cell-crit { background-color: #f97316; }
+    .cell-trouble { background-color: #eab308; }
+    .cell-maint { background-color: #8b5cf6; }
+
+    /* Custom Scrollbar */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #090d14; }
+    ::-webkit-scrollbar-thumb { background: #28364d; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #3b4f6e; }
+
+    @keyframes pulse-red {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.55); }
+      50% { box-shadow: 0 0 0 8px rgba(239, 68, 68, 0); }
+    }
+    .pulse-critical {
+      animation: pulse-red 1.8s infinite;
+    }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col selection:bg-sky-500 selection:text-white">
+
+  <!-- TOP COMMAND HEADER -->
+  <header class="bg-[#0d131d] border-b border-[#1f2b3e] px-3 py-2 flex flex-wrap items-center justify-between gap-2 sticky top-0 z-30">
+    <div class="flex items-center gap-3">
+      <div class="flex items-center gap-2">
+        <span class="w-3 h-3 rounded-full bg-emerald-400 animate-pulse"></span>
+        <span class="font-bold tracking-tight text-white text-sm sm:text-base">WatcherMCP</span>
+        <span class="text-[11px] font-mono-num uppercase px-2 py-0.5 rounded bg-sky-500/15 text-sky-400 border border-sky-500/30">Hardware Overwatch v0.1.0</span>
+      </div>
+      <div class="hidden xl:flex items-center gap-2 text-xs text-slate-400 border-l border-slate-800 pl-3">
+        <span>Ledger Chain:</span>
+        <span id="hdr-ledger-badge" class="font-mono-num text-emerald-400 font-semibold">VERIFIED (SHA-256)</span>
+        <span class="text-slate-600">|</span>
+        <span>Budget Left:</span>
+        <span id="hdr-budget-left" class="font-mono-num text-slate-200 font-semibold">$9,815.00</span>
+        <span class="text-slate-600">|</span>
+        <span>Environment:</span>
+        <span id="hdr-env-mode" class="font-mono-num text-amber-300">SIMULATION + LIVE API</span>
+      </div>
+    </div>
+
+    <!-- Right Action & Popup Controls -->
+    <div class="flex flex-wrap items-center gap-2">
+      <!-- Role Switcher -->
+      <div class="flex items-center bg-[#141c2b] border border-slate-700/80 rounded px-2 py-1 text-xs">
+        <span class="text-slate-400 mr-1.5">Role:</span>
+        <select id="role-select" aria-label="Select Operator Role" class="bg-transparent text-sky-300 font-mono-num font-semibold focus:outline-none cursor-pointer">
+          <option value="operator">operator</option>
+          <option value="procurement">procurement</option>
+          <option value="finance">finance</option>
+          <option value="policy_admin">policy_admin</option>
+          <option value="viewer">viewer</option>
+        </select>
+      </div>
+
+      <!-- Popup 1 Trigger: Start-of-Day Login Popup -->
+      <button id="btn-open-login-popup" type="button" class="px-2.5 py-1 rounded text-xs font-medium bg-indigo-600/25 hover:bg-indigo-600/40 text-indigo-300 border border-indigo-500/40 flex items-center gap-1.5 transition">
+        <span>🌅</span>
+        <span>Start-of-Day Login Popup</span>
+      </button>
+
+      <!-- Popup 2 Trigger: Something Goes Wrong Alert Popup -->
+      <button id="btn-trigger-fault-popup" type="button" class="px-2.5 py-1 rounded text-xs font-semibold bg-red-600/25 hover:bg-red-600/40 text-red-300 border border-red-500/50 flex items-center gap-1.5 pulse-critical transition">
+        <span>🚨</span>
+        <span>Simulate Fault Popup</span>
+      </button>
+
+      <!-- Kill Switch Toggle -->
+      <button id="btn-kill-switch" type="button" class="px-2.5 py-1 rounded text-xs font-mono-num font-semibold bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-600 transition">
+        KILL SWITCH: OFF
+      </button>
+    </div>
+  </header>
+
+  <!-- MAIN WORKSPACE: LEFT ICON RAIL + DASHBOARD CONTENT -->
+  <div class="flex-1 flex min-h-0">
+
+    <!-- LEFT VERTICAL NAVIGATION RAIL (Matches Top-Left Reference Image) -->
+    <aside class="w-14 sm:w-16 bg-[#0c111a] border-r border-[#1f2b3e] flex flex-col items-center py-3 gap-2 shrink-0 select-none">
+      <button type="button" data-nav="overview" class="nav-rail-btn w-11 h-11 rounded-lg flex flex-col items-center justify-center bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 text-[10px] gap-0.5" title="NOC Monitor Matrix">
+        <span class="text-sm">🏠</span>
+        <span>NOC</span>
+      </button>
+      <button type="button" data-nav="redfish" class="nav-rail-btn w-11 h-11 rounded-lg flex flex-col items-center justify-center text-slate-400 hover:text-white hover:bg-slate-800/60 text-[10px] gap-0.5" title="Redfish BMC Nodes">
+        <span class="text-sm">🖥️</span>
+        <span>BMC</span>
+      </button>
+      <button type="button" data-nav="lifecycle" class="nav-rail-btn w-11 h-11 rounded-lg flex flex-col items-center justify-center text-slate-400 hover:text-white hover:bg-slate-800/60 text-[10px] gap-0.5" title="Overwatch Safety Gate">
+        <span class="text-sm">🛡️</span>
+        <span>Gate</span>
+      </button>
+      <button type="button" data-nav="tender" class="nav-rail-btn w-11 h-11 rounded-lg flex flex-col items-center justify-center text-slate-400 hover:text-white hover:bg-slate-800/60 text-[10px] gap-0.5" title="6-Factor Procurement Tender">
+        <span class="text-sm">⚖️</span>
+        <span>Tender</span>
+      </button>
+      <button type="button" data-nav="mcp" class="nav-rail-btn w-11 h-11 rounded-lg flex flex-col items-center justify-center text-slate-400 hover:text-white hover:bg-slate-800/60 text-[10px] gap-0.5" title="MCP Trust Zones">
+        <span class="text-sm">🔌</span>
+        <span>MCP</span>
+      </button>
+      <button type="button" data-nav="audit" class="nav-rail-btn w-11 h-11 rounded-lg flex flex-col items-center justify-center text-slate-400 hover:text-white hover:bg-slate-800/60 text-[10px] gap-0.5" title="Hash-Chained Audit Ledger">
+        <span class="text-sm">⛓️</span>
+        <span>Ledger</span>
+      </button>
+      <div class="mt-auto flex flex-col items-center gap-2">
+        <button type="button" id="rail-btn-briefing" class="w-11 h-11 rounded-lg flex flex-col items-center justify-center text-indigo-400 hover:bg-indigo-500/15 text-[10px] gap-0.5" title="Morning Shift Handover">
+          <span class="text-sm">📋</span>
+          <span>Shift</span>
+        </button>
+        <button type="button" id="rail-btn-alarm" class="w-11 h-11 rounded-lg flex flex-col items-center justify-center text-red-400 hover:bg-red-500/15 text-[10px] gap-0.5" title="Active Alarms">
+          <span class="text-sm">🔔</span>
+          <span id="rail-alarm-count" class="font-mono-num">4</span>
+        </button>
+      </div>
+    </aside>
+
+    <!-- CENTRAL MULTI-PANEL DASHBOARD GRID -->
+    <main class="flex-1 p-3 space-y-3 overflow-y-auto">
+
+      <!-- ACTIVE INCIDENT BANNER (Shown when an anomaly is active) -->
+      <div id="live-anomaly-banner" class="bg-red-950/60 border border-red-500/50 rounded-md px-3 py-2 flex flex-wrap items-center justify-between gap-2">
+        <div class="flex items-center gap-2 text-xs">
+          <span class="px-2 py-0.5 rounded bg-red-600 text-white font-mono-num font-bold uppercase">ACTIVE CASE</span>
+          <span id="banner-incident-text" class="text-red-200 font-medium">
+            Thermal anomaly on <strong class="font-mono-num text-white">rack1-node01</strong> (Inlet 84.5°C &ge; 80.0°C threshold) — Case <code class="text-amber-300">case_seed_001</code> in state <strong class="text-amber-300">PLANNED</strong>.
+          </span>
+        </div>
+        <div class="flex items-center gap-2">
+          <button type="button" id="banner-btn-inspect" class="px-2.5 py-1 rounded bg-red-500/20 hover:bg-red-500/35 border border-red-400/40 text-red-200 text-xs font-medium">
+            Inspect Incident Popup
+          </button>
+          <button type="button" id="banner-btn-remediate" class="px-2.5 py-1 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold">
+            Step Pipeline &rarr;
+          </button>
+        </div>
+      </div>
+
+      <!-- TOP ROW: PANEL 1 (LEFT: SERVER MONITOR MATRIX & CHARTS) + PANEL 2 (RIGHT: BOXWATCH NODE CARDS) -->
+      <div class="grid grid-cols-1 xl:grid-cols-12 gap-3">
+
+        <!-- PANEL 1 (TOP-LEFT REFERENCE STYLE): Server Monitor - Performance (7 cols on XL) -->
+        <section class="xl:col-span-7 noc-panel p-3 flex flex-col gap-3">
+          <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2">
+            <div class="flex items-center gap-2">
+              <span class="text-emerald-400 font-bold text-sm">Server Monitor - Redfish Fleet Performance</span>
+              <span class="text-[11px] text-slate-400 font-mono-num">Last Polled: <span id="last-poll-seconds">2</span>s ago</span>
+            </div>
+            <div class="flex items-center gap-1.5 text-[11px]">
+              <button type="button" data-matrix-filter="all" class="matrix-filter-btn px-2 py-0.5 rounded bg-slate-800 text-white border border-slate-600">All (256)</button>
+              <button type="button" data-matrix-filter="down" class="matrix-filter-btn px-2 py-0.5 rounded bg-slate-900 text-red-400 border border-slate-800">Down (<span id="flt-down-cnt">6</span>)</button>
+              <button type="button" data-matrix-filter="crit" class="matrix-filter-btn px-2 py-0.5 rounded bg-slate-900 text-orange-400 border border-slate-800">Critical (<span id="flt-crit-cnt">8</span>)</button>
+              <button type="button" data-matrix-filter="trouble" class="matrix-filter-btn px-2 py-0.5 rounded bg-slate-900 text-amber-300 border border-slate-800">Trouble (<span id="flt-trbl-cnt">27</span>)</button>
+              <button type="button" data-matrix-filter="maint" class="matrix-filter-btn px-2 py-0.5 rounded bg-slate-900 text-purple-300 border border-slate-800">Soak/Maint (<span id="flt-maint-cnt">5</span>)</button>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-12 gap-3">
+            <!-- Left Sub-Column: 16x16 Clickable Monitor Pixel Matrix -->
+            <div class="md:col-span-5 noc-card p-2.5 flex flex-col justify-between">
+              <div class="flex items-center justify-between mb-1.5">
+                <span class="text-xs font-semibold text-slate-200">Current Status of All Monitors</span>
+                <span id="matrix-selected-label" class="text-[11px] font-mono-num text-sky-400">rack1-node01</span>
+              </div>
+              <div id="monitor-matrix" class="monitor-grid my-auto" aria-label="256 Redfish Node Monitor Matrix"></div>
+              <div class="mt-2 pt-1.5 border-t border-slate-800/80 flex items-center justify-between text-[10px] text-slate-400">
+                <span class="flex items-center gap-1"><i class="w-2 h-2 rounded-sm bg-emerald-500 inline-block"></i>OK</span>
+                <span class="flex items-center gap-1"><i class="w-2 h-2 rounded-sm bg-red-500 inline-block"></i>Down</span>
+                <span class="flex items-center gap-1"><i class="w-2 h-2 rounded-sm bg-orange-500 inline-block"></i>&ge;80°C</span>
+                <span class="flex items-center gap-1"><i class="w-2 h-2 rounded-sm bg-yellow-500 inline-block"></i>Stale</span>
+                <span class="flex items-center gap-1"><i class="w-2 h-2 rounded-sm bg-purple-500 inline-block"></i>Soak</span>
+              </div>
+            </div>
+
+            <!-- Right Sub-Column: Status Counters, Clock & Live Telemetry Charts -->
+            <div class="md:col-span-7 flex flex-col gap-2.5">
+              <!-- Top Status Row: All Monitors + Redfish Monitor + IST Clock -->
+              <div class="grid grid-cols-3 gap-2">
+                <!-- All Monitors Pill Card -->
+                <div class="noc-card p-2">
+                  <div class="text-[11px] font-semibold text-slate-300 mb-1.5">All Monitors</div>
+                  <div class="space-y-1 text-[11px] font-mono-num">
+                    <div class="flex justify-between items-center bg-red-600/85 text-white px-1.5 py-0.5 rounded">
+                      <span>Down</span><span id="card-all-down">6</span>
+                    </div>
+                    <div class="flex justify-between items-center bg-orange-600/85 text-white px-1.5 py-0.5 rounded">
+                      <span>Critical</span><span id="card-all-crit">8</span>
+                    </div>
+                    <div class="flex justify-between items-center bg-amber-600/85 text-white px-1.5 py-0.5 rounded">
+                      <span>Trouble</span><span id="card-all-trbl">27</span>
+                    </div>
+                    <div class="flex justify-between items-center bg-purple-600/85 text-white px-1.5 py-0.5 rounded">
+                      <span>Maintenance</span><span id="card-all-maint">5</span>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Server / Safety Gate Monitor Card -->
+                <div class="noc-card p-2">
+                  <div class="text-[11px] font-semibold text-slate-300 mb-1.5">Overwatch Gate</div>
+                  <div class="space-y-1 text-[11px] font-mono-num">
+                    <div class="flex justify-between items-center bg-red-600/80 text-white px-1.5 py-0.5 rounded">
+                      <span>Detected</span><span id="card-gate-detected">2</span>
+                    </div>
+                    <div class="flex justify-between items-center bg-orange-600/80 text-white px-1.5 py-0.5 rounded">
+                      <span>Held/Stale</span><span id="card-gate-held">1</span>
+                    </div>
+                    <div class="flex justify-between items-center bg-amber-600/80 text-white px-1.5 py-0.5 rounded">
+                      <span>Planned</span><span id="card-gate-planned">1</span>
+                    </div>
+                    <div class="flex justify-between items-center bg-purple-600/80 text-white px-1.5 py-0.5 rounded">
+                      <span>Post-Check</span><span id="card-gate-soak">1</span>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Live Date & Time Card (Matches 09:19 AM IST Reference Widget) -->
+                <div class="noc-card p-2 flex flex-col justify-between items-center text-center">
+                  <div class="text-[11px] font-semibold text-slate-300 w-full text-left">Date &amp; Time</div>
+                  <div class="my-auto py-1">
+                    <div id="clock-time" class="text-lg sm:text-xl font-bold font-mono-num text-white tracking-tight">09:19 AM</div>
+                    <div class="text-[10px] text-slate-400 font-mono-num">(GMT+5:30) IST</div>
+                    <div id="clock-date" class="text-[11px] text-slate-300 mt-1">06 Nov 2026</div>
+                  </div>
+                  <div class="w-full pt-1 border-t border-slate-800 flex justify-between text-[10px] text-slate-400 font-mono-num">
+                    <span>Soak: 60s</span>
+                    <span class="text-emerald-400">TLS: ON</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Middle Mini-Row: Thermal & Load Line Charts -->
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div class="noc-card p-2">
+                  <div class="flex items-center justify-between text-[11px] mb-1">
+                    <span class="text-slate-300 font-medium">Rack Thermal Trajectory (°C)</span>
+                    <span id="chart-temp-badge" class="font-mono-num text-orange-400 font-semibold">Peak 84.5°C</span>
+                  </div>
+                  <div class="relative h-24">
+                    <canvas id="canvas-thermal-chart" class="w-full h-full"></canvas>
+                  </div>
+                </div>
+
+                <div class="noc-card p-2">
+                  <div class="flex items-center justify-between text-[11px] mb-1">
+                    <span class="text-slate-300 font-medium">Redfish Packet &amp; Receipt Traffic</span>
+                    <span class="font-mono-num text-emerald-400 font-semibold">14.1 kbps</span>
+                  </div>
+                  <div class="relative h-24">
+                    <canvas id="canvas-traffic-chart" class="w-full h-full"></canvas>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- PANEL 2 (TOP-RIGHT REFERENCE STYLE): boxwatch.app/dashboard Fleet Node Cards (5 cols on XL) -->
+        <section class="xl:col-span-5 noc-panel overflow-hidden flex flex-col">
+          <!-- macOS Window Bar -->
+          <div class="bg-[#0d121c] px-3 py-2 border-b border-slate-800 flex items-center justify-between">
+            <div class="flex items-center gap-1.5">
+              <span class="w-2.5 h-2.5 rounded-full bg-red-500 inline-block"></span>
+              <span class="w-2.5 h-2.5 rounded-full bg-amber-400 inline-block"></span>
+              <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block"></span>
+            </div>
+            <span class="text-xs font-mono-num text-slate-400">watchermcp.app/dashboard</span>
+            <button type="button" id="btn-inject-spike" class="text-[11px] font-mono-num px-2 py-0.5 rounded bg-red-500/20 hover:bg-red-500/35 text-red-300 border border-red-500/30">
+              + Thermal Spike
+            </button>
+          </div>
+
+          <div class="p-3 flex-1 flex flex-col gap-3">
+            <!-- Top 3 Summary KPI Tiles (AVG CPU, AVG MEMORY, ALERTS) -->
+            <div class="grid grid-cols-3 gap-2.5">
+              <div class="noc-card p-2.5">
+                <div class="text-[10px] font-mono-num uppercase tracking-wider text-slate-400">AVG CPU LOAD</div>
+                <div class="mt-1 flex items-baseline gap-1.5">
+                  <span class="w-2 h-2 rounded-full bg-emerald-400 inline-block"></span>
+                  <span id="bw-avg-cpu" class="text-lg sm:text-xl font-mono-num font-bold text-emerald-400">27.4<span class="text-xs font-normal">%</span></span>
+                </div>
+              </div>
+              <div class="noc-card p-2.5">
+                <div class="text-[10px] font-mono-num uppercase tracking-wider text-slate-400">AVG MEMORY</div>
+                <div class="mt-1 flex items-baseline gap-1.5">
+                  <span class="w-2 h-2 rounded-full bg-emerald-400 inline-block"></span>
+                  <span id="bw-avg-mem" class="text-lg sm:text-xl font-mono-num font-bold text-emerald-400">38.7<span class="text-xs font-normal">%</span></span>
+                </div>
+              </div>
+              <div class="noc-card p-2.5">
+                <div class="text-[10px] font-mono-num uppercase tracking-wider text-slate-400">PEAK INLET / ALERTS</div>
+                <div class="mt-1 flex items-baseline gap-1.5">
+                  <span class="w-2 h-2 rounded-full bg-amber-400 inline-block"></span>
+                  <span id="bw-peak-temp" class="text-lg sm:text-xl font-mono-num font-bold text-emerald-400">84.5<span class="text-xs font-normal">°C</span></span>
+                </div>
+              </div>
+            </div>
+
+            <!-- 2x2 Primary Redfish BMC Node Cards (Click to select & inspect) -->
+            <div id="boxwatch-node-grid" class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 my-auto"></div>
+          </div>
+        </section>
+
+      </div>
+
+      <!-- BOTTOM ROW: PANEL 3 (SERVER DRILLDOWN, 6 METRIC CARDS, AVAILABILITY DONUT & OVERWATCH PIPELINE) -->
+      <section class="noc-panel p-3 space-y-3">
+        <!-- Category Navigation Tabs (Matching Bottom-Left Reference Image) -->
+        <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2">
+          <div class="flex flex-wrap items-center gap-1 text-xs">
+            <button type="button" data-tab="overview" class="drill-tab-btn px-3 py-1.5 rounded font-semibold bg-sky-500/20 text-sky-300 border border-sky-500/40">
+              Server &amp; Apps Overview
+            </button>
+            <button type="button" data-tab="lifecycle" class="drill-tab-btn px-3 py-1.5 rounded font-medium text-slate-400 hover:text-white hover:bg-slate-800/60">
+              Overwatch Safety Gate &amp; Cases
+            </button>
+            <button type="button" data-tab="tender" class="drill-tab-btn px-3 py-1.5 rounded font-medium text-slate-400 hover:text-white hover:bg-slate-800/60">
+              Procurement Tender (6-Factor)
+            </button>
+            <button type="button" data-tab="mcp" class="drill-tab-btn px-3 py-1.5 rounded font-medium text-slate-400 hover:text-white hover:bg-slate-800/60">
+              MCP Trust Zones (Fleet / Records / Market)
+            </button>
+            <button type="button" data-tab="audit" class="drill-tab-btn px-3 py-1.5 rounded font-medium text-slate-400 hover:text-white hover:bg-slate-800/60">
+              Hash-Chained Audit Ledger
+            </button>
+          </div>
+
+          <div class="flex items-center gap-2 text-xs text-slate-400 font-mono-num">
+            <span>Selected BMC:</span>
+            <span id="drill-node-title" class="text-white font-bold">rack1-node01 (web-prod-01)</span>
+            <span id="drill-node-ip" class="text-sky-400">192.168.1.50</span>
+          </div>
+        </div>
+
+        <!-- Always-Visible Hardware Overwatch 8-Stage Interactive Pipeline Bar -->
+        <div class="noc-card p-2.5 flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-2.5">
+          <div class="flex flex-wrap items-center gap-1.5 text-[11px] font-mono-num" id="pipeline-steps-bar">
+            <span data-stage="OBSERVE" class="pipe-badge px-2 py-1 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">1. Observe</span>
+            <span class="text-slate-600">&rarr;</span>
+            <span data-stage="RECEIPTS" class="pipe-badge px-2 py-1 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">2. Gather Receipts</span>
+            <span class="text-slate-600">&rarr;</span>
+            <span data-stage="PLAN" class="pipe-badge px-2 py-1 rounded bg-sky-500/25 text-sky-300 border border-sky-500/50 font-bold">3. Plan</span>
+            <span class="text-slate-600">&rarr;</span>
+            <span data-stage="VERIFY" class="pipe-badge px-2 py-1 rounded bg-slate-800 text-slate-400 border border-slate-700">4. Verify</span>
+            <span class="text-slate-600">&rarr;</span>
+            <span data-stage="APPROVE" class="pipe-badge px-2 py-1 rounded bg-slate-800 text-slate-400 border border-slate-700">5. Approve</span>
+            <span class="text-slate-600">&rarr;</span>
+            <span data-stage="PERMIT" class="pipe-badge px-2 py-1 rounded bg-slate-800 text-slate-400 border border-slate-700">6. Permit (120s HMAC)</span>
+            <span class="text-slate-600">&rarr;</span>
+            <span data-stage="EXECUTE" class="pipe-badge px-2 py-1 rounded bg-slate-800 text-slate-400 border border-slate-700">7. Execute</span>
+            <span class="text-slate-600">&rarr;</span>
+            <span data-stage="SOAK" class="pipe-badge px-2 py-1 rounded bg-slate-800 text-slate-400 border border-slate-700">8. Verify Recovery (3 Samples)</span>
+          </div>
+
+          <!-- Interactive Lifecycle Action Buttons (Also compatible with overwatch/web/app.js IDs) -->
+          <div class="flex flex-wrap items-center gap-1.5">
+            <button type="button" id="btn-observe" class="px-2.5 py-1 rounded text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600">
+              Poll Receipt
+            </button>
+            <button type="button" id="btn-ticket" class="px-2.5 py-1 rounded text-xs font-medium bg-sky-600/30 hover:bg-sky-600/50 text-sky-200 border border-sky-500/40">
+              Prepare Plan
+            </button>
+            <button type="button" id="btn-verify" class="px-2.5 py-1 rounded text-xs font-medium bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-200 border border-indigo-500/40">
+              Verify Freshness
+            </button>
+            <button type="button" id="btn-approve" class="px-2.5 py-1 rounded text-xs font-medium bg-amber-600/30 hover:bg-amber-600/50 text-amber-200 border border-amber-500/40">
+              Approve Plan
+            </button>
+            <button type="button" id="btn-permit" class="px-2.5 py-1 rounded text-xs font-medium bg-purple-600/30 hover:bg-purple-600/50 text-purple-200 border border-purple-500/40">
+              Issue HMAC Permit
+            </button>
+            <button type="button" id="btn-execute" class="px-2.5 py-1 rounded text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white">
+              Execute &amp; Soak
+            </button>
+            <button type="button" id="btn-soak-sample" class="px-2.5 py-1 rounded text-xs font-medium bg-teal-600/30 hover:bg-teal-600/50 text-teal-200 border border-teal-500/40">
+              + Healthy Sample (<span id="soak-progress-lbl">0/3</span>)
+            </button>
+          </div>
+        </div>
+
+        <!-- TAB 1: SERVER & APPS OVERVIEW (Matches Bottom-Left Reference Image 6 KPI Cards + Availability Donut + Multi-Series Chart) -->
+        <div id="tab-panel-overview" class="space-y-3">
+          <!-- 6 Metric Cards Row -->
+          <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
+            <!-- Card 1: CPU / Inlet Temperature -->
+            <div class="noc-card p-3 flex flex-col justify-between">
+              <div class="w-8 h-8 rounded bg-sky-500/20 border border-sky-500/40 flex items-center justify-center text-sky-400 font-mono-num text-xs font-bold mb-2">
+                CPU
+              </div>
+              <div>
+                <div class="text-xs font-semibold text-white">CPU &amp; Thermal</div>
+                <div class="text-[11px] text-slate-400 mt-0.5">Inlet: <span id="kpi-temp-val" class="text-amber-300 font-mono-num">84.5°C</span></div>
+                <div class="text-[11px] text-slate-400">Interrupt: <span class="font-mono-num">0.4%</span></div>
+              </div>
+              <div class="mt-2">
+                <div class="w-full h-1.5 bg-slate-800 rounded overflow-hidden">
+                  <div id="kpi-cpu-bar" class="h-full bg-sky-500" style="width: 28%"></div>
+                </div>
+                <div id="kpi-cpu-pct" class="text-sm font-mono-num font-bold text-sky-400 mt-1">28%</div>
+              </div>
+            </div>
+
+            <!-- Card 2: Memory -->
+            <div class="noc-card p-3 flex flex-col justify-between">
+              <div class="w-8 h-8 rounded bg-sky-500/20 border border-sky-500/40 flex items-center justify-center text-sky-400 font-mono-num text-xs font-bold mb-2">
+                MEM
+              </div>
+              <div>
+                <div class="text-xs font-semibold text-white">Memory</div>
+                <div class="text-[11px] text-slate-400 mt-0.5">Total: <span class="font-mono-num">64.0 GB</span></div>
+                <div class="text-[11px] text-slate-400">Free: <span class="font-mono-num">49.0 GB</span></div>
+              </div>
+              <div class="mt-2">
+                <div class="w-full h-1.5 bg-slate-800 rounded overflow-hidden">
+                  <div id="kpi-mem-bar" class="h-full bg-sky-500" style="width: 23.4%"></div>
+                </div>
+                <div id="kpi-mem-pct" class="text-sm font-mono-num font-bold text-sky-400 mt-1">23.4%</div>
+              </div>
+            </div>
+
+            <!-- Card 3: Disk / NVMe -->
+            <div class="noc-card p-3 flex flex-col justify-between">
+              <div class="w-8 h-8 rounded bg-sky-500/20 border border-sky-500/40 flex items-center justify-center text-sky-400 font-mono-num text-xs font-bold mb-2">
+                DSK
+              </div>
+              <div>
+                <div class="text-xs font-semibold text-white">Disk / NVMe</div>
+                <div class="text-[11px] text-slate-400 mt-0.5">Total: <span class="font-mono-num">1.92 TB</span></div>
+                <div class="text-[11px] text-slate-400">Free: <span class="font-mono-num">1.07 TB</span></div>
+              </div>
+              <div class="mt-2">
+                <div class="w-full h-1.5 bg-slate-800 rounded overflow-hidden">
+                  <div id="kpi-disk-bar" class="h-full bg-sky-500" style="width: 44%"></div>
+                </div>
+                <div id="kpi-disk-pct" class="text-sm font-mono-num font-bold text-sky-400 mt-1">44%</div>
+              </div>
+            </div>
+
+            <!-- Card 4: IOPS & Receipt Queue -->
+            <div class="noc-card p-3 flex flex-col justify-between">
+              <div class="w-8 h-8 rounded bg-sky-500/20 border border-sky-500/40 flex items-center justify-center text-sky-400 font-mono-num text-xs font-bold mb-2">
+                IOP
+              </div>
+              <div>
+                <div class="text-xs font-semibold text-white">IOPS &amp; Receipts</div>
+                <div class="text-[11px] text-slate-400 mt-0.5">Max Age: <span class="font-mono-num">300s</span></div>
+                <div class="text-[11px] text-slate-400">Basis: <span class="font-mono-num text-emerald-400">device</span></div>
+              </div>
+              <div class="mt-2">
+                <div class="w-full h-1.5 bg-slate-800 rounded overflow-hidden">
+                  <div class="h-full bg-sky-500" style="width: 65%"></div>
+                </div>
+                <div id="kpi-iops-val" class="text-sm font-mono-num font-bold text-sky-400 mt-1">65.2</div>
+              </div>
+            </div>
+
+            <!-- Card 5: Network / Redfish Link -->
+            <div class="noc-card p-3 flex flex-col justify-between">
+              <div class="w-8 h-8 rounded bg-sky-500/20 border border-sky-500/40 flex items-center justify-center text-sky-400 font-mono-num text-xs font-bold mb-2">
+                NET
+              </div>
+              <div>
+                <div class="text-xs font-semibold text-white">Network</div>
+                <div class="text-[11px] text-slate-400 mt-0.5">Origin-Bound: <span class="text-emerald-400">Yes</span></div>
+                <div class="text-[11px] text-slate-400">Redirects: <span class="font-mono-num">Disabled</span></div>
+              </div>
+              <div class="mt-2">
+                <div class="text-[10px] text-slate-400 font-mono-num">IN <span class="text-sky-400 font-bold">11.7kbps</span> OUT <span class="text-sky-400 font-bold">2.4kbps</span></div>
+              </div>
+            </div>
+
+            <!-- Card 6: Response Time & Soak Hold -->
+            <div class="noc-card p-3 flex flex-col justify-between">
+              <div class="w-8 h-8 rounded bg-sky-500/20 border border-sky-500/40 flex items-center justify-center text-sky-400 font-mono-num text-xs font-bold mb-2">
+                SLA
+              </div>
+              <div>
+                <div class="text-xs font-semibold text-white">Response &amp; Soak</div>
+                <div class="text-[11px] text-slate-400 mt-0.5">Lost Packets: <span class="font-mono-num">0</span></div>
+                <div class="text-[11px] text-slate-400">Permit TTL: <span class="font-mono-num">120s</span></div>
+              </div>
+              <div class="mt-2">
+                <div id="kpi-resp-val" class="text-sm font-mono-num font-bold text-sky-400">0.7ms</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Bottom Sub-Row: Device Availability Donut + 7/15/30-Day Bars + Multi-Series Telemetry Chart -->
+          <div class="grid grid-cols-1 lg:grid-cols-12 gap-2.5">
+            <!-- Device Availability Donut (3 cols) -->
+            <div class="lg:col-span-3 noc-card p-3 flex flex-col items-center justify-between">
+              <div class="w-full text-xs font-semibold text-slate-200">Device Availability</div>
+              <div class="relative w-32 h-32 my-2 flex items-center justify-center">
+                <svg viewBox="0 0 36 36" class="w-full h-full -rotate-90">
+                  <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="#ef4444" stroke-width="3.8"></path>
+                  <path id="avail-donut-arc" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="#84cc16" stroke-width="3.8" stroke-dasharray="89, 100"></path>
+                </svg>
+                <div class="absolute inset-0 flex flex-col items-center justify-center text-center">
+                  <span class="text-[10px] uppercase text-slate-400 font-semibold">UP</span>
+                  <span id="avail-donut-pct" class="text-xl font-bold font-mono-num text-white">89%</span>
+                </div>
+              </div>
+              <div class="text-[11px] text-slate-400">Availability (Today)</div>
+            </div>
+
+            <!-- Availability Last 30 Days Bars (4 cols) -->
+            <div class="lg:col-span-4 noc-card p-3 flex flex-col justify-between">
+              <div class="text-xs font-semibold text-slate-200">Availability Last 30 Days</div>
+              <div class="space-y-3 my-auto py-2">
+                <div class="flex items-center gap-3">
+                  <span class="text-xs text-slate-300 w-16">7 Days</span>
+                  <div class="flex-1 h-3.5 rounded-full bg-red-500 overflow-hidden flex">
+                    <div class="bg-lime-500 h-full" style="width: 86%"></div>
+                  </div>
+                  <span class="text-xs font-mono-num text-slate-300 w-10 text-right">86%</span>
+                </div>
+                <div class="flex items-center gap-3">
+                  <span class="text-xs text-slate-300 w-16">15 Days</span>
+                  <div class="flex-1 h-3.5 rounded-full bg-red-500 overflow-hidden flex">
+                    <div class="bg-lime-500 h-full" style="width: 91%"></div>
+                  </div>
+                  <span class="text-xs font-mono-num text-slate-300 w-10 text-right">91%</span>
+                </div>
+                <div class="flex items-center gap-3">
+                  <span class="text-xs text-slate-300 w-16">30 Days</span>
+                  <div class="flex-1 h-3.5 rounded-full bg-red-500 overflow-hidden flex">
+                    <div class="bg-lime-500 h-full" style="width: 94%"></div>
+                  </div>
+                  <span class="text-xs font-mono-num text-slate-300 w-10 text-right">94%</span>
+                </div>
+              </div>
+              <div class="text-[11px] text-slate-400 flex justify-between">
+                <span>Soak Recovery Requirement: 3 consecutive clean samples</span>
+                <span class="text-emerald-400 font-mono-num">ZERO BLIND RETRIES</span>
+              </div>
+            </div>
+
+            <!-- Multi-Series Memory & Thermal Details Chart (5 cols) -->
+            <div class="lg:col-span-5 noc-card p-3 flex flex-col justify-between">
+              <div class="flex items-center justify-between">
+                <span class="text-xs font-semibold text-slate-200">Memory &amp; Thermal Telemetry Details</span>
+                <span class="text-[11px] font-mono-num text-slate-400">64.0 GB Installed</span>
+              </div>
+              <div class="relative h-36 my-1">
+                <canvas id="canvas-memory-details" class="w-full h-full"></canvas>
+              </div>
+              <div class="flex flex-wrap items-center gap-3 text-[10px] font-mono-num text-slate-400">
+                <span class="flex items-center gap-1"><i class="w-2.5 h-0.5 bg-sky-400 inline-block"></i>system.memory.committed.avg</span>
+                <span class="flex items-center gap-1"><i class="w-2.5 h-0.5 bg-amber-400 inline-block"></i>system.thermal.inlet.celsius</span>
+                <span class="flex items-center gap-1"><i class="w-2.5 h-0.5 bg-emerald-400 inline-block"></i>system.memory.free.avg</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB 2: OVERWATCH SAFETY GATE, CASES & CANONICAL RECEIPTS -->
+        <div id="tab-panel-lifecycle" class="hidden space-y-3">
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
+            <div class="noc-card p-3">
+              <h3 class="text-xs font-bold uppercase tracking-wider text-sky-400 mb-2">Active Hardware Cases &amp; State Machine</h3>
+              <div id="cases-table-container" class="space-y-2 text-xs"></div>
+            </div>
+            <div class="noc-card p-3">
+              <h3 class="text-xs font-bold uppercase tracking-wider text-emerald-400 mb-2">Latest Canonical Receipt &amp; HMAC Permit</h3>
+              <div id="action-output" class="font-mono-num text-xs bg-[#0b1018] border border-slate-800 rounded p-2.5 overflow-x-auto max-h-64 text-slate-300"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB 3: 6-FACTOR PROCUREMENT TENDER RUBRIC -->
+        <div id="tab-panel-tender" class="hidden space-y-3">
+          <div class="noc-card p-3">
+            <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+              <div>
+                <h3 class="text-xs font-bold uppercase tracking-wider text-amber-300">Deterministic 6-Factor Replacement Tender Engine</h3>
+                <p class="text-[11px] text-slate-400">Unverified factors score 0 (never partial). Orders &ge; USD $1,000 require dual Procurement + Finance approval.</p>
+              </div>
+              <button type="button" id="btn-evaluate-tender" class="px-3 py-1 rounded text-xs font-semibold bg-amber-500/20 hover:bg-amber-500/35 text-amber-300 border border-amber-500/40">
+                Re-Score Vendor Bids (Decimal Math)
+              </button>
+            </div>
+            <div class="overflow-x-auto">
+              <table class="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr class="border-b border-slate-800 text-slate-400 font-mono-num text-[11px]">
+                    <th class="py-2 px-2">Vendor</th>
+                    <th class="py-2 px-2">Component FRU</th>
+                    <th class="py-2 px-2">Pre-Qual Verified</th>
+                    <th class="py-2 px-2 text-right">Weighted Score</th>
+                    <th class="py-2 px-2 text-right">Unit Bid (USD)</th>
+                    <th class="py-2 px-2">Recommendation</th>
+                  </tr>
+                </thead>
+                <tbody id="tender-bids-tbody" class="divide-y divide-slate-800/70 font-mono-num"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB 4: READ-ONLY MCP TRUST ZONES PLAYGROUND -->
+        <div id="tab-panel-mcp" class="hidden space-y-3">
+          <div class="grid grid-cols-1 lg:grid-cols-12 gap-3">
+            <div class="lg:col-span-5 noc-card p-3 space-y-2.5">
+              <div class="text-xs font-bold uppercase tracking-wider text-sky-400">MCP Trust Zone Tool Invoker (2025-06-18)</div>
+              <p class="text-[11px] text-slate-400">
+                All three MCP zones are strictly read-only (`readOnlyHint: true`). No approval, permit, or write tool exists in any MCP zone.
+              </p>
+              <div class="space-y-2">
+                <button type="button" data-mcp-tool="fleet.get_observations" class="w-full text-left px-3 py-2 rounded noc-card hover:border-sky-500/50 flex items-center justify-between text-xs">
+                  <span><strong class="text-emerald-400 font-mono-num">[fleet]</strong> fleet.get_observations</span>
+                  <span class="text-[10px] font-mono-num text-slate-400">POST /mcp/fleet</span>
+                </button>
+                <button type="button" data-mcp-tool="records.get_cases" class="w-full text-left px-3 py-2 rounded noc-card hover:border-sky-500/50 flex items-center justify-between text-xs">
+                  <span><strong class="text-sky-400 font-mono-num">[records]</strong> records.get_cases</span>
+                  <span class="text-[10px] font-mono-num text-slate-400">POST /mcp/records</span>
+                </button>
+                <button type="button" data-mcp-tool="records.get_plans" class="w-full text-left px-3 py-2 rounded noc-card hover:border-sky-500/50 flex items-center justify-between text-xs">
+                  <span><strong class="text-sky-400 font-mono-num">[records]</strong> records.get_plans</span>
+                  <span class="text-[10px] font-mono-num text-slate-400">POST /mcp/records</span>
+                </button>
+                <button type="button" data-mcp-tool="market.get_tenders" class="w-full text-left px-3 py-2 rounded noc-card hover:border-sky-500/50 flex items-center justify-between text-xs">
+                  <span><strong class="text-amber-400 font-mono-num">[market]</strong> market.get_tenders</span>
+                  <span class="text-[10px] font-mono-num text-slate-400">POST /mcp/market</span>
+                </button>
+              </div>
+            </div>
+            <div class="lg:col-span-7 noc-card p-3 flex flex-col">
+              <div class="text-xs font-bold uppercase tracking-wider text-emerald-400 mb-2">JSON-RPC 2.0 Streamable HTTP Response</div>
+              <pre id="mcp-rpc-output" class="flex-1 bg-[#0b1018] border border-slate-800 rounded p-3 text-[11px] font-mono-num text-emerald-300 overflow-x-auto max-h-64"></pre>
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB 5: TAMPER-EVIDENT HASH-CHAINED AUDIT LEDGER -->
+        <div id="tab-panel-audit" class="hidden space-y-3">
+          <div class="noc-card p-3">
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-xs font-bold uppercase tracking-wider text-purple-300">SQLite Hash-Chained Audit Ledger (SHA-256)</span>
+              <span id="ledger-count-badge" class="text-[11px] font-mono-num text-emerald-400">Chain Integrity: VALID</span>
+            </div>
+            <div id="audit-ledger-list" class="space-y-1.5 max-h-64 overflow-y-auto font-mono-num text-[11px]"></div>
+          </div>
+        </div>
+
+        <!-- Hidden compatibility hooks for legacy smoke test scripts -->
+        <div id="main-panel" class="hidden">
+          <div id="dashboard"></div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- ===================================================================== -->
+  <!-- POPUP 1: START-OF-DAY OPERATOR LOGIN & SHIFT BRIEFING MODAL           -->
+  <!-- ("Popups when login in start of the day" from user reference image)   -->
+  <!-- ===================================================================== -->
+  <div id="start-of-day-modal" class="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="noc-panel max-w-xl w-full p-5 border border-indigo-500/40 shadow-2xl space-y-4">
+      <div class="flex items-start justify-between gap-3 border-b border-slate-800 pb-3">
+        <div>
+          <div class="flex items-center gap-2">
+            <span class="px-2 py-0.5 rounded text-[10px] font-mono-num font-bold uppercase bg-indigo-500/20 text-indigo-300 border border-indigo-500/40">START OF DAY SHIFT BRIEFING</span>
+            <span class="text-xs font-mono-num text-emerald-400">09:19 AM IST</span>
+          </div>
+          <h2 class="text-base sm:text-lg font-bold text-white mt-1">WatcherMCP Operator Authentication &amp; Morning Handover</h2>
+          <p class="text-xs text-slate-400">Verify overnight Redfish telemetry receipts, active thermal holds, and safety gate status before beginning shift operations.</p>
+        </div>
+        <button type="button" id="btn-close-login-modal" class="text-slate-400 hover:text-white text-sm px-2 py-1 rounded bg-slate-800/80">✕</button>
+      </div>
+
+      <!-- Shift Snapshot KPI Grid -->
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
+        <div class="noc-card p-2.5">
+          <div class="text-[10px] text-slate-400 uppercase font-mono-num">Total Monitors</div>
+          <div class="text-lg font-bold font-mono-num text-emerald-400 mt-0.5">256</div>
+          <div class="text-[10px] text-slate-400">210 Healthy</div>
+        </div>
+        <div class="noc-card p-2.5">
+          <div class="text-[10px] text-slate-400 uppercase font-mono-num">Thermal Alerts</div>
+          <div class="text-lg font-bold font-mono-num text-red-400 mt-0.5">8</div>
+          <div class="text-[10px] text-red-300">&ge; 80.0°C Inlet</div>
+        </div>
+        <div class="noc-card p-2.5">
+          <div class="text-[10px] text-slate-400 uppercase font-mono-num">Open Tenders</div>
+          <div class="text-lg font-bold font-mono-num text-amber-300 mt-0.5">1</div>
+          <div class="text-[10px] text-slate-400">FRU-402 ($185)</div>
+        </div>
+        <div class="noc-card p-2.5">
+          <div class="text-[10px] text-slate-400 uppercase font-mono-num">Ledger Chain</div>
+          <div class="text-lg font-bold font-mono-num text-sky-400 mt-0.5">100%</div>
+          <div class="text-[10px] text-emerald-400">SHA-256 Valid</div>
+        </div>
+      </div>
+
+      <!-- Overnight Priority Briefing Items -->
+      <div class="noc-card p-3 space-y-1.5 text-xs">
+        <div class="font-semibold text-slate-200">Overnight Shift Queue Requiring Attention:</div>
+        <div class="flex items-center justify-between text-slate-300">
+          <span>1. <strong class="font-mono-num text-white">rack1-node01</strong> inlet at <span class="text-red-400 font-mono-num">84.5°C</span> (Receipt <code class="text-sky-300">rcpt_seed_001</code>)</span>
+          <span class="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-mono-num text-[10px]">PLANNED</span>
+        </div>
+        <div class="flex items-center justify-between text-slate-300">
+          <span>2. <strong class="font-mono-num text-white">storage-bmc-02</strong> Redfish link heartbeat lost (`worker-01`)</span>
+          <span class="px-1.5 py-0.5 rounded bg-red-500/20 text-red-300 font-mono-num text-[10px]">OFFLINE</span>
+        </div>
+        <div class="flex items-center justify-between text-slate-300">
+          <span>3. <strong class="font-mono-num text-white">gpu-shelf-04</strong> post-action soak verification (`2/3` clean samples)</span>
+          <span class="px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 font-mono-num text-[10px]">POST_CHECK</span>
+        </div>
+      </div>
+
+      <!-- Login Form (Compatible with #login-form and #token) -->
+      <form id="login-form" class="space-y-3 pt-1">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+          <div>
+            <label for="modal-role-picker" class="block text-[11px] text-slate-400 mb-1">Select Shift Role</label>
+            <select id="modal-role-picker" class="w-full px-2.5 py-1.5 rounded bg-[#0b1018] border border-slate-700 text-xs text-white font-mono-num">
+              <option value="operator">operator (Observe, Plan, Execute with Permit)</option>
+              <option value="procurement">procurement (Approve &amp; Score Vendor Tenders)</option>
+              <option value="finance">finance (Dual Approval &ge; $1,000 USD)</option>
+              <option value="policy_admin">policy_admin (Issue Permits &amp; Kill Switch)</option>
+              <option value="viewer">viewer (Read-Only Telemetry &amp; Audit)</option>
+            </select>
+          </div>
+          <div>
+            <label for="token" class="block text-[11px] text-slate-400 mb-1">Bearer Token (Optional / Auto-filled for Demo)</label>
+            <input id="token" type="password" value="demo-operator-token-sha256" placeholder="Paste demo-credentials.json token..." class="w-full px-2.5 py-1.5 rounded bg-[#0b1018] border border-slate-700 text-xs text-white font-mono-num">
+          </div>
+        </div>
+        <div id="auth-status" class="text-xs text-emerald-400 font-mono-num">Ready: Session bound to local simulation + live API fallback.</div>
+        <div class="flex flex-wrap items-center justify-end gap-2 pt-2 border-t border-slate-800">
+          <button type="button" id="btn-login-inspect-crit" class="px-3 py-1.5 rounded text-xs font-medium bg-red-500/20 hover:bg-red-500/35 text-red-300 border border-red-500/40">
+            Jump Straight to Critical Anomaly
+          </button>
+          <button type="submit" class="px-4 py-1.5 rounded text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white">
+            Authenticate &amp; Start Shift
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ===================================================================== -->
+  <!-- POPUP 2: WHEN SOMETHING GOES WRONG — CRITICAL ANOMALY & GATE ALERT     -->
+  <!-- ("Popups when something goes wrong" from user reference image)        -->
+  <!-- ===================================================================== -->
+  <div id="incident-alert-modal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm hidden items-center justify-center p-4">
+    <div class="noc-panel max-w-xl w-full p-5 border-2 border-red-500/70 shadow-2xl space-y-4">
+      <div class="flex items-start justify-between gap-3 border-b border-red-900/60 pb-3">
+        <div>
+          <div class="flex items-center gap-2">
+            <span class="px-2 py-0.5 rounded text-[10px] font-mono-num font-bold uppercase bg-red-600 text-white">CRITICAL HARDWARE ANOMALY</span>
+            <span id="incident-modal-time" class="text-xs font-mono-num text-red-300">Just now</span>
+          </div>
+          <h2 id="incident-modal-title" class="text-base sm:text-lg font-bold text-white mt-1">
+            Thermal Excursion Detected on rack1-node01 (89.2°C &ge; 80.0°C)
+          </h2>
+          <p id="incident-modal-subtitle" class="text-xs text-slate-300">
+            Hardware Overwatch Safety Gate intercepted abnormal Redfish sensor telemetry and opened durable case <code class="text-amber-300">case_seed_001</code>.
+          </p>
+        </div>
+        <button type="button" id="btn-close-incident-modal" class="text-slate-400 hover:text-white text-sm px-2 py-1 rounded bg-slate-800">✕</button>
+      </div>
+
+      <!-- Diagnostic Evidence Receipt Box -->
+      <div class="noc-card p-3 space-y-1.5 font-mono-num text-xs border border-red-500/30">
+        <div class="flex justify-between">
+          <span class="text-slate-400">Target Asset / BMC:</span>
+          <span id="inc-asset" class="text-white font-bold">rack1-node01 (192.168.1.50)</span>
+        </div>
+        <div class="flex justify-between">
+          <span class="text-slate-400">Redfish Sensor URI:</span>
+          <span id="inc-uri" class="text-sky-400">/redfish/v1/Chassis/1U/Thermal</span>
+        </div>
+        <div class="flex justify-between">
+          <span class="text-slate-400">Measured Temperature:</span>
+          <span id="inc-temp" class="text-red-400 font-bold">89.2°C (Device Timestamp Basis — FRESH)</span>
+        </div>
+        <div class="flex justify-between">
+          <span class="text-slate-400">Receipt SHA-256 Digest:</span>
+          <span id="inc-hash" class="text-emerald-400">a4f9c28109e7b11c8a30e2f19d74b08e...</span>
+        </div>
+        <div class="flex justify-between">
+          <span class="text-slate-400">Safety Gate Policy:</span>
+          <span id="inc-gate-msg" class="text-amber-300">Direct write blocked — Canonical Plan + 120s HMAC Permit required</span>
+        </div>
+      </div>
+
+      <!-- 1-Click Incident Response Actions -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+        <button type="button" id="inc-btn-plan" class="px-3 py-2 rounded font-semibold bg-sky-600 hover:bg-sky-500 text-white text-left flex items-center justify-between">
+          <span>1. Prepare Deterministic Plan</span>
+          <span class="font-mono-num text-[10px]">throttle_workload</span>
+        </button>
+        <button type="button" id="inc-btn-approve-permit" class="px-3 py-2 rounded font-semibold bg-emerald-600 hover:bg-emerald-500 text-white text-left flex items-center justify-between">
+          <span>2. Approve &amp; Issue HMAC Permit</span>
+          <span class="font-mono-num text-[10px]">120s Single-Use</span>
+        </button>
+        <button type="button" id="inc-btn-tender" class="px-3 py-2 rounded font-medium bg-amber-500/20 hover:bg-amber-500/35 text-amber-300 border border-amber-500/40 text-left flex items-center justify-between">
+          <span>3. View Fan Replacement Tender</span>
+          <span class="font-mono-num text-[10px]">$185.00 USD</span>
+        </button>
+        <button type="button" id="inc-btn-freeze" class="px-3 py-2 rounded font-medium bg-red-500/20 hover:bg-red-500/35 text-red-300 border border-red-500/40 text-left flex items-center justify-between">
+          <span>4. Engage Global Kill Switch</span>
+          <span class="font-mono-num text-[10px]">Freeze Actions</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- TOAST NOTIFICATION CONTAINER -->
+  <div id="toast-container" class="fixed bottom-4 right-4 z-50 space-y-2 max-w-sm"></div>
+
+  <script>
+    (function () {
+      "use strict";
+
+      // ---------------------------------------------------------------------
+      // 1. DETERMINISTIC HARDWARE OVERWATCH STATE & 256-NODE FLEET MODEL
+      // ---------------------------------------------------------------------
+      const PRIMARY_NODES = [
+        {
+          id: "rack1-node01",
+          alias: "web-prod-01",
+          ip: "192.168.1.50",
+          status: "critical",
+          temp: 84.5,
+          cpu: 28,
+          mem: 67,
+          disk: 45,
+          iops: 65.2,
+          respMs: 0.7,
+          availability: 89,
+          caseState: "PLANNED",
+          soakSamples: 0
+        },
+        {
+          id: "rack1-node02",
+          alias: "db-master",
+          ip: "192.168.1.51",
+          status: "online",
+          temp: 76.0,
+          cpu: 45,
+          mem: 82,
+          disk: 34,
+          iops: 91.4,
+          respMs: 0.9,
+          availability: 96,
+          caseState: "HEALTHY",
+          soakSamples: 3
+        },
+        {
+          id: "gpu-shelf-04",
+          alias: "cache-01",
+          ip: "192.168.1.52",
+          status: "maint",
+          temp: 64.2,
+          cpu: 12,
+          mem: 34,
+          disk: 23,
+          iops: 31.8,
+          respMs: 0.5,
+          availability: 98,
+          caseState: "POST_CHECK",
+          soakSamples: 2
+        },
+        {
+          id: "storage-bmc-02",
+          alias: "worker-01",
+          ip: "192.168.1.53",
+          status: "down",
+          temp: 88.9,
+          cpu: 0,
+          mem: 0,
+          disk: 0,
+          iops: 0.0,
+          respMs: 0.0,
+          availability: 62,
+          caseState: "HELD",
+          soakSamples: 0
+        }
+      ];
+
+      // Build 256 monitors for the 16x16 NOC matrix
+      const monitors = [];
+      for (let i = 0; i < 256; i++) {
+        if (i < PRIMARY_NODES.length) {
+          const p = PRIMARY_NODES[i];
+          monitors.push({
+            index: i,
+            id: p.id,
+            alias: p.alias,
+            ip: p.ip,
+            state: p.status === "critical" ? "crit" : (p.status === "online" ? "ok" : p.status),
+            temp: p.temp,
+            cpu: p.cpu,
+            mem: p.mem,
+            disk: p.disk,
+            iops: p.iops,
+            respMs: p.respMs,
+            availability: p.availability
+          });
+        } else {
+          // Deterministic distribution matching reference counts (Down: 6, Crit: 8, Trouble: 27, Maint: 5, OK: 210)
+          let state = "ok";
+          let temp = 56 + ((i * 7) % 19);
+          if (i % 47 === 0 && monitors.filter(m => m.state === "down").length < 6) {
+            state = "down";
+            temp = 91.0;
+          } else if (i % 29 === 0 && monitors.filter(m => m.state === "crit").length < 8) {
+            state = "crit";
+            temp = 81.5 + (i % 6);
+          } else if (i % 9 === 0 && monitors.filter(m => m.state === "trouble").length < 27) {
+            state = "trouble";
+            temp = 77.0 + (i % 3);
+          } else if (i % 51 === 0 && monitors.filter(m => m.state === "maint").length < 5) {
+            state = "maint";
+            temp = 61.0;
+          }
+          monitors.push({
+            index: i,
+            id: "rack" + (Math.floor(i / 32) + 1) + "-node" + String((i % 32) + 1).padStart(2, "0"),
+            alias: "srv-bmc-" + String(i + 1).padStart(3, "0"),
+            ip: "10.24." + Math.floor(i / 64) + "." + ((i % 200) + 10),
+            state: state,
+            temp: Number(temp.toFixed(1)),
+            cpu: state === "down" ? 0 : (14 + ((i * 13) % 72)),
+            mem: state === "down" ? 0 : (22 + ((i * 17) % 68)),
+            disk: state === "down" ? 0 : (18 + ((i * 11) % 65)),
+            iops: state === "down" ? 0 : Number((20 + ((i * 5.3) % 75)).toFixed(1)),
+            respMs: state === "down" ? 0 : Number((0.4 + ((i % 9) * 0.15)).toFixed(1)),
+            availability: state === "down" ? 64 : (state === "crit" ? 88 : 99)
+          });
+        }
+      }
+
+      const state = {
+        role: "operator",
+        token: "demo-operator-token-sha256",
+        killSwitch: false,
+        budgetTotal: 10000.00,
+        budgetReserved: 185.00,
+        budgetSpent: 0.00,
+        selectedMonitorIndex: 0,
+        matrixFilter: "all",
+        activeTab: "overview",
+        pipelineStage: "PLAN", // OBSERVE -> RECEIPTS -> PLAN -> VERIFY -> APPROVE -> PERMIT -> EXECUTE -> SOAK -> CLOSED
+        planVerified: false,
+        planApproved: false,
+        activePermit: null,
+        soakSamples: 0,
+        pollSeconds: 1,
+        thermalSeries: [72, 73, 74, 75, 76, 78, 81, 83, 84.5, 84.0, 84.5, 83.8],
+        trafficSeries: [10.2, 11.8, 9.4, 13.5, 14.1, 12.0, 15.2, 11.7, 13.9, 14.4, 12.8, 14.1],
+        cases: [
+          {
+            id: "case_seed_001",
+            asset_id: "rack1-node01",
+            state: "PLANNED",
+            temperature: 84.5,
+            receipt_id: "rcpt_seed_001",
+            plan_id: "plan_seed_001",
+            action: "thermal.throttle_workload",
+            cost_usd: "0.00",
+            soak_samples: 0,
+            updated_at: "Just now"
+          },
+          {
+            id: "case_seed_002",
+            asset_id: "gpu-shelf-04",
+            state: "POST_CHECK",
+            temperature: 64.2,
+            receipt_id: "rcpt_seed_002",
+            plan_id: "plan_seed_002",
+            action: "cooling.fan_profile_boost",
+            cost_usd: "0.00",
+            soak_samples: 2,
+            updated_at: "40s ago"
+          },
+          {
+            id: "case_seed_003",
+            asset_id: "storage-bmc-02",
+            state: "HELD",
+            temperature: 88.9,
+            receipt_id: "rcpt_stale_003",
+            plan_id: null,
+            action: "held_stale_timestamp",
+            cost_usd: "185.00",
+            soak_samples: 0,
+            updated_at: "4m ago"
+          }
+        ],
+        vendorBids: [
+          {
+            vendor: "Apex DataCenter Parts",
+            fru: "Hot-swap Fan Module FRU-402",
+            verified: true,
+            score: "92.50",
+            price: "185.00",
+            recommendation: "proceed_to_procurement"
+          },
+          {
+            vendor: "NorthBridge Server Supply",
+            fru: "Hot-swap Fan Module FRU-402",
+            verified: true,
+            score: "84.10",
+            price: "210.00",
+            recommendation: "proceed_to_procurement"
+          },
+          {
+            vendor: "Unverified GreyMarket Lead (Crustdata Indicative)",
+            fru: "Hot-swap Fan Module FRU-402",
+            verified: false,
+            score: "0.00",
+            price: "140.00",
+            recommendation: "reject (unverified factor = 0)"
+          }
+        ],
+        auditEvents: [
+          { seq: 1, kind: "initialized", hash: "7d865e959b2466918c9863afca942d0fb89d7c9ac0c99bafc3749504ded97730", summary: "Policy v1.0 initialized (environment=simulation, budget=$10,000.00)" },
+          { seq: 2, kind: "observation", hash: "a4f9c28109e7b11c8a30e2f19d74b08e5c112233445566778899aabbccddeeff", summary: "Receipt rcpt_seed_001 ingested from rack1-node01 (84.5°C, basis=device)" },
+          { seq: 3, kind: "plan_proposed", hash: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", summary: "Deterministic plan plan_seed_001 prepared for case_seed_001 (action=thermal.throttle_workload)" }
+        ]
+      };
+
+      function pseudoSha256(input) {
+        let h1 = 0xdeadbeef ^ input.length;
+        let h2 = 0x41c6ce57 ^ input.length;
+        for (let i = 0; i < input.length; i++) {
+          const ch = input.charCodeAt(i);
+          h1 = Math.imul(h1 ^ ch, 2654435761);
+          h2 = Math.imul(h2 ^ ch, 1597334677);
+        }
+        h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+        h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+        const hex1 = (h1 >>> 0).toString(16).padStart(8, "0");
+        const hex2 = (h2 >>> 0).toString(16).padStart(8, "0");
+        return (hex1 + hex2 + hex1 + hex2 + hex1 + hex2 + hex1 + hex2).slice(0, 64);
+      }
+
+      function addAuditEvent(kind, summary) {
+        const seq = state.auditEvents.length + 1;
+        const prev = state.auditEvents[state.auditEvents.length - 1].hash;
+        const hash = pseudoSha256(seq + ":" + kind + ":" + prev + ":" + summary);
+        state.auditEvents.unshift({ seq, kind, hash, summary });
+      }
+
+      function showToast(title, detail, tone) {
+        const container = document.getElementById("toast-container");
+        if (!container) return;
+        const el = document.createElement("div");
+        const borderMap = {
+          ok: "border-emerald-500/60 bg-[#0f1f1c] text-emerald-200",
+          warn: "border-amber-500/60 bg-[#231b0f] text-amber-200",
+          crit: "border-red-500/70 bg-[#261115] text-red-200"
+        };
+        el.className = "p-3 rounded-md border shadow-xl text-xs transition " + (borderMap[tone] || borderMap.ok);
+        el.innerHTML = "<div class='font-bold font-mono-num mb-0.5'>" + title + "</div><div class='text-[11px] opacity-90'>" + detail + "</div>";
+        container.appendChild(el);
+        setTimeout(() => {
+          if (el.parentNode) el.parentNode.removeChild(el);
+        }, 4200);
+      }
+
+      // ---------------------------------------------------------------------
+      // 2. RENDER 16x16 MONITOR MATRIX & BOXWATCH NODE CARDS
+      // ---------------------------------------------------------------------
+      function renderMonitorMatrix() {
+        const grid = document.getElementById("monitor-matrix");
+        if (!grid) return;
+        grid.innerHTML = "";
+
+        let downCnt = 0, critCnt = 0, trblCnt = 0, maintCnt = 0;
+        monitors.forEach(m => {
+          if (m.state === "down") downCnt++;
+          else if (m.state === "crit") critCnt++;
+          else if (m.state === "trouble") trblCnt++;
+          else if (m.state === "maint") maintCnt++;
+        });
+
+        document.getElementById("flt-down-cnt").textContent = String(downCnt);
+        document.getElementById("flt-crit-cnt").textContent = String(critCnt);
+        document.getElementById("flt-trbl-cnt").textContent = String(trblCnt);
+        document.getElementById("flt-maint-cnt").textContent = String(maintCnt);
+
+        document.getElementById("card-all-down").textContent = String(downCnt);
+        document.getElementById("card-all-crit").textContent = String(critCnt);
+        document.getElementById("card-all-trbl").textContent = String(trblCnt);
+        document.getElementById("card-all-maint").textContent = String(maintCnt);
+        document.getElementById("rail-alarm-count").textContent = String(downCnt + critCnt);
+
+        monitors.forEach((m, idx) => {
+          const cell = document.createElement("div");
+          const colorClass =
+            m.state === "down" ? "cell-down" :
+            m.state === "crit" ? "cell-crit" :
+            m.state === "trouble" ? "cell-trouble" :
+            m.state === "maint" ? "cell-maint" : "cell-ok";
+
+          const filteredOut = state.matrixFilter !== "all" && m.state !== state.matrixFilter;
+          cell.className = "monitor-cell " + colorClass +
+            (idx === state.selectedMonitorIndex ? " selected-cell" : "") +
+            (filteredOut ? " opacity-20" : "");
+          cell.title = m.id + " (" + m.ip + ") | Temp: " + m.temp + "°C | State: " + m.state.toUpperCase();
+          cell.setAttribute("data-monitor-idx", String(idx));
+          grid.appendChild(cell);
+        });
+      }
+
+      function renderBoxwatchCards() {
+        const container = document.getElementById("boxwatch-node-grid");
+        if (!container) return;
+        container.innerHTML = "";
+
+        const featured = monitors.slice(0, 4);
+        featured.forEach((node, idx) => {
+          const isSelected = state.selectedMonitorIndex === idx;
+          const badgeHtml =
+            node.state === "down"
+              ? '<span class="text-[11px] font-mono-num text-red-400 flex items-center gap-1"><i class="w-1.5 h-1.5 rounded-full bg-red-500 inline-block"></i>offline</span>'
+              : node.state === "crit"
+              ? '<span class="text-[11px] font-mono-num text-orange-400 flex items-center gap-1"><i class="w-1.5 h-1.5 rounded-full bg-orange-500 inline-block animate-ping"></i>critical ' + node.temp + '°C</span>'
+              : node.state === "maint"
+              ? '<span class="text-[11px] font-mono-num text-purple-300 flex items-center gap-1"><i class="w-1.5 h-1.5 rounded-full bg-purple-400 inline-block"></i>soak hold</span>'
+              : '<span class="text-[11px] font-mono-num text-emerald-400 flex items-center gap-1"><i class="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block"></i>online</span>';
+
+          const tempPct = Math.min(100, Math.round((node.temp / 100) * 100));
+          const tempBarColor = node.temp >= 80 ? "bg-red-500" : (node.temp >= 75 ? "bg-amber-400" : "bg-emerald-400");
+          const memBarColor = node.mem >= 80 ? "bg-red-500" : (node.mem >= 65 ? "bg-amber-400" : "bg-emerald-400");
+
+          const card = document.createElement("div");
+          card.className = "noc-card p-3 cursor-pointer transition hover:border-sky-500/60 " +
+            (isSelected ? "ring-1 ring-sky-400 border-sky-400" : "");
+          card.setAttribute("data-monitor-idx", String(idx));
+          card.innerHTML = `
+            <div class="flex items-center justify-between">
+              <span class="font-mono-num font-bold text-xs text-white">${node.alias} <span class="text-slate-400 font-normal">(${node.id})</span></span>
+              ${badgeHtml}
+            </div>
+            <div class="text-[11px] font-mono-num text-slate-400 mt-0.5 mb-2.5">${node.ip}</div>
+            <div class="space-y-1.5 text-[10px] font-mono-num">
+              <div class="flex items-center gap-2">
+                <span class="w-8 text-slate-400">CPU</span>
+                <div class="flex-1 h-1.5 bg-slate-800 rounded overflow-hidden">
+                  <div class="h-full bg-emerald-400" style="width:${node.cpu}%"></div>
+                </div>
+                <span class="w-9 text-right text-slate-300">${node.cpu}%</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <span class="w-8 text-slate-400">MEM</span>
+                <div class="flex-1 h-1.5 bg-slate-800 rounded overflow-hidden">
+                  <div class="h-full ${memBarColor}" style="width:${node.mem}%"></div>
+                </div>
+                <span class="w-9 text-right text-slate-300">${node.mem}%</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <span class="w-8 text-slate-400">TEMP</span>
+                <div class="flex-1 h-1.5 bg-slate-800 rounded overflow-hidden">
+                  <div class="h-full ${tempBarColor}" style="width:${tempPct}%"></div>
+                </div>
+                <span class="w-9 text-right ${node.temp >= 80 ? 'text-red-400 font-bold' : 'text-slate-300'}">${node.temp}°</span>
+              </div>
+            </div>
+          `;
+          container.appendChild(card);
+        });
+      }
+
+      // ---------------------------------------------------------------------
+      // 3. RENDER SELECTED NODE DRILLDOWN, PIPELINE & TABS
+      // ---------------------------------------------------------------------
+      function renderSelectedNodeDrilldown() {
+        const node = monitors[state.selectedMonitorIndex] || monitors[0];
+        document.getElementById("matrix-selected-label").textContent = node.id;
+        document.getElementById("drill-node-title").textContent = node.id + " (" + node.alias + ")";
+        document.getElementById("drill-node-ip").textContent = node.ip;
+
+        document.getElementById("kpi-temp-val").textContent = node.temp + "°C";
+        document.getElementById("kpi-temp-val").className =
+          node.temp >= 80 ? "text-red-400 font-mono-num font-bold" : "text-emerald-400 font-mono-num";
+        document.getElementById("kpi-cpu-bar").style.width = node.cpu + "%";
+        document.getElementById("kpi-cpu-pct").textContent = node.cpu + "%";
+        document.getElementById("kpi-mem-bar").style.width = node.mem + "%";
+        document.getElementById("kpi-mem-pct").textContent = node.mem + "%";
+        document.getElementById("kpi-disk-bar").style.width = node.disk + "%";
+        document.getElementById("kpi-disk-pct").textContent = node.disk + "%";
+        document.getElementById("kpi-iops-val").textContent = String(node.iops);
+        document.getElementById("kpi-resp-val").textContent = node.respMs + "ms";
+
+        document.getElementById("avail-donut-pct").textContent = node.availability + "%";
+        document.getElementById("avail-donut-arc").setAttribute("stroke-dasharray", node.availability + ", 100");
+        document.getElementById("soak-progress-lbl").textContent = state.soakSamples + "/3";
+
+        // Update pipeline stage badges
+        const stagesOrder = ["OBSERVE", "RECEIPTS", "PLAN", "VERIFY", "APPROVE", "PERMIT", "EXECUTE", "SOAK"];
+        const currentIdx = stagesOrder.indexOf(state.pipelineStage);
+        document.querySelectorAll("#pipeline-steps-bar .pipe-badge").forEach(el => {
+          const st = el.getAttribute("data-stage");
+          const idx = stagesOrder.indexOf(st);
+          if (idx < currentIdx) {
+            el.className = "pipe-badge px-2 py-1 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40";
+          } else if (idx === currentIdx) {
+            el.className = "pipe-badge px-2 py-1 rounded bg-sky-500/30 text-white border border-sky-400 font-bold";
+          } else {
+            el.className = "pipe-badge px-2 py-1 rounded bg-slate-800/80 text-slate-400 border border-slate-700";
+          }
+        });
+
+        // Update Cases & Action Output
+        const casesContainer = document.getElementById("cases-table-container");
+        if (casesContainer) {
+          casesContainer.innerHTML = state.cases.map(c => `
+            <div class="p-2.5 rounded bg-[#0b1018] border border-slate-800 flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <div class="font-mono-num font-bold text-white">${c.id} &mdash; <span class="text-sky-400">${c.asset_id}</span></div>
+                <div class="text-[11px] text-slate-400 font-mono-num">Receipt: ${c.receipt_id} | Temp: ${c.temperature}°C | Action: ${c.action}</div>
+              </div>
+              <div class="flex items-center gap-2 font-mono-num text-[11px]">
+                <span class="px-2 py-0.5 rounded ${c.state === 'CLOSED' ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-300'}">${c.state}</span>
+                <span class="text-slate-400">Soak: ${c.soak_samples}/3</span>
+              </div>
+            </div>
+          `).join("");
+        }
+
+        // Update Tender Table
+        const tenderBody = document.getElementById("tender-bids-tbody");
+        if (tenderBody) {
+          tenderBody.innerHTML = state.vendorBids.map(b => `
+            <tr class="hover:bg-slate-800/40">
+              <td class="py-2 px-2 text-white font-semibold">${b.vendor}</td>
+              <td class="py-2 px-2 text-slate-300">${b.fru}</td>
+              <td class="py-2 px-2">${b.verified ? '<span class="text-emerald-400">VERIFIED</span>' : '<span class="text-red-400">UNVERIFIED (0)</span>'}</td>
+              <td class="py-2 px-2 text-right font-bold ${b.verified ? 'text-sky-300' : 'text-slate-500'}">${b.score}</td>
+              <td class="py-2 px-2 text-right text-amber-300">$${b.price}</td>
+              <td class="py-2 px-2">
+                <span class="px-2 py-0.5 rounded text-[10px] ${b.verified ? 'bg-emerald-500/20 text-emerald-300' : 'bg-red-500/20 text-red-300'}">${b.recommendation}</span>
+              </td>
+            </tr>
+          `).join("");
+        }
+
+        // Update Audit Ledger
+        const auditList = document.getElementById("audit-ledger-list");
+        if (auditList) {
+          auditList.innerHTML = state.auditEvents.map(ev => `
+            <div class="p-2 rounded bg-[#0b1018] border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+              <div>
+                <span class="text-purple-400 font-bold">#${ev.seq} [${ev.kind}]</span>
+                <span class="text-slate-300 ml-1.5">${ev.summary}</span>
+              </div>
+              <span class="text-[10px] text-emerald-400/90">sha256:${ev.hash.slice(0, 20)}...</span>
+            </div>
+          `).join("");
+        }
+
+        // Sync hidden #dashboard for smoke tests
+        const dashEl = document.getElementById("dashboard");
+        if (dashEl) {
+          dashEl.textContent = JSON.stringify({
+            active_tickets: state.cases,
+            post_check_remains_open: state.soakSamples < 3,
+            selected_node: node.id
+          });
+        }
+      }
+
+      // ---------------------------------------------------------------------
+      // 4. CANVAS TELEMETRY CHARTS (Thermal, Packet Traffic, Memory Details)
+      // ---------------------------------------------------------------------
+      function drawLineChart(canvasId, seriesList, maxVal, thresholdVal) {
+        const canvas = document.getElementById(canvasId);
+        if (!canvas) return;
+        const rect = canvas.parentElement.getBoundingClientRect();
+        canvas.width = Math.max(220, Math.floor(rect.width));
+        canvas.height = Math.max(85, Math.floor(rect.height));
+        const ctx = canvas.getContext("2d");
+        const w = canvas.width;
+        const h = canvas.height;
+        ctx.clearRect(0, 0, w, h);
+
+        // Grid lines
+        ctx.strokeStyle = "#1e293b";
+        ctx.lineWidth = 1;
+        for (let g = 1; g <= 3; g++) {
+          const y = (h / 4) * g;
+          ctx.beginPath();
+          ctx.moveTo(0, y);
+          ctx.lineTo(w, y);
+          ctx.stroke();
+        }
+
+        // Optional threshold line (e.g. 80°C thermal trigger)
+        if (thresholdVal) {
+          const ty = h - (thresholdVal / maxVal) * (h - 14) - 6;
+          ctx.strokeStyle = "rgba(239, 68, 68, 0.55)";
+          ctx.setLineDash([4, 4]);
+          ctx.beginPath();
+          ctx.moveTo(0, ty);
+          ctx.lineTo(w, ty);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
+
+        seriesList.forEach(s => {
+          const pts = s.data;
+          if (!pts || pts.length < 2) return;
+          ctx.strokeStyle = s.color;
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          pts.forEach((val, idx) => {
+            const x = (idx / (pts.length - 1)) * (w - 12) + 6;
+            const y = h - (Math.min(maxVal, val) / maxVal) * (h - 16) - 8;
+            if (idx === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+          });
+          ctx.stroke();
+        });
+      }
+
+      function renderAllCharts() {
+        drawLineChart("canvas-thermal-chart", [
+          { color: "#f97316", data: state.thermalSeries }
+        ], 100, 80);
+
+        drawLineChart("canvas-traffic-chart", [
+          { color: "#10b981", data: state.trafficSeries }
+        ], 20, null);
+
+        drawLineChart("canvas-memory-details", [
+          { color: "#38bdf8", data: [42, 43, 42.5, 44, 43.8, 44.2, 43.9, 44.5, 44.1, 44.0] },
+          { color: "#f59e0b", data: state.thermalSeries.slice(-10) },
+          { color: "#10b981", data: [22, 21.5, 22.1, 21.8, 22.4, 22.0, 21.9, 22.2, 22.5, 23.4] }
+        ], 100, null);
+      }
+
+      // ---------------------------------------------------------------------
+      // 5. HARDWARE OVERWATCH LIFECYCLE ACTIONS & MCP PLAYGROUND
+      // ---------------------------------------------------------------------
+      function updateActionOutput(obj) {
+        const out = document.getElementById("action-output");
+        if (out) {
+          out.innerHTML = "<pre>" + JSON.stringify(obj, null, 2) + "</pre>";
+        }
+      }
+
+      function runObserve() {
+        const node = monitors[state.selectedMonitorIndex];
+        const rcptId = "rcpt_" + Date.now().toString(36);
+        const receipt = {
+          id: rcptId,
+          environment: "simulation",
+          authority: "device",
+          max_age: 300,
+          sha256: pseudoSha256(node.id + ":" + node.temp + ":" + Date.now()),
+          body: {
+            asset_id: node.id,
+            temperature: node.temp,
+            observed_at: Math.floor(Date.now() / 1000),
+            timestamp_basis: "device"
+          }
+        };
+        state.pipelineStage = "RECEIPTS";
+        addAuditEvent("observation", "Fresh Redfish receipt " + rcptId + " collected from " + node.id + " (" + node.temp + "°C)");
+        updateActionOutput({ step: "1-2. Observe & Gather Receipts", receipt });
+        renderSelectedNodeDrilldown();
+        showToast("Redfish Receipt Collected", "Canonical SHA-256 receipt recorded for " + node.id, "ok");
+      }
+
+      function runPreparePlan() {
+        const node = monitors[state.selectedMonitorIndex];
+        const planId = "TICK-" + String(Math.floor(100 + Math.random() * 899));
+        const planBody = {
+          ticket_id: planId,
+          case_id: "case_seed_001",
+          asset_id: node.id,
+          action: "thermal.throttle_workload",
+          estimated_cost_usd: "0.00",
+          environment: "simulation"
+        };
+        const planHash = pseudoSha256(JSON.stringify(planBody));
+        state.pipelineStage = "PLAN";
+        state.planVerified = false;
+        state.planApproved = false;
+        addAuditEvent("plan_prepared", "Prepared deterministic remediation plan " + planId + " (hash=" + planHash.slice(0, 12) + "...)");
+        updateActionOutput({ step: "3. Deterministic Plan Prepared", ticket: planId, plan_hash: planHash, plan: planBody });
+        renderSelectedNodeDrilldown();
+        showToast("Remediation Plan Prepared", "Plan " + planId + " bound to canonical receipt hash.", "ok");
+      }
+
+      function runVerifyPlan() {
+        if (state.killSwitch) {
+          showToast("Verification Refused", "Global Kill Switch is active.", "crit");
+          return;
+        }
+        const node = monitors[state.selectedMonitorIndex];
+        state.planVerified = true;
+        state.pipelineStage = "VERIFY";
+        const verification = {
+          step: "4. Safety Gate Verification",
+          target: node.id,
+          freshness_check: "PASS (measurement age 4s <= 300s max_age)",
+          origin_tls_check: "PASS (same-origin, redirects disabled)",
+          plan_hash_match: true
+        };
+        addAuditEvent("verified", "Safety gate verified receipt freshness and canonical plan hash for " + node.id);
+        updateActionOutput(verification);
+        renderSelectedNodeDrilldown();
+        showToast("Safety Gate Verified", "Receipt freshness and canonical plan hash verified.", "ok");
+      }
+
+      function runApprovePlan() {
+        state.planApproved = true;
+        state.pipelineStage = "APPROVE";
+        const approval = {
+          step: "5. Role-Bound Plan Approval",
+          approved_by: state.role + "-local",
+          role: state.role,
+          ticket_id: "TICK-001",
+          budget_check: "PASS ($0.00 <= $1,000 dual-approval threshold)"
+        };
+        addAuditEvent("approved", "Plan approved by role '" + state.role + "'");
+        updateActionOutput(approval);
+        renderSelectedNodeDrilldown();
+        showToast("Plan Approved", "Plan approved by " + state.role + ".", "ok");
+      }
+
+      function runIssuePermit() {
+        if (state.killSwitch) {
+          showToast("Permit Refused", "Global Kill Switch is active — no permits can be signed.", "crit");
+          return;
+        }
+        const permitId = "PERM-" + String(Math.floor(100 + Math.random() * 899));
+        const hmacSig = pseudoSha256("HMAC:" + permitId + ":" + state.role + ":" + Date.now());
+        state.activePermit = {
+          permit_id: permitId,
+          ttl_seconds: 120,
+          single_use: true,
+          consumed: false,
+          hmac_sha256: hmacSig
+        };
+        state.pipelineStage = "PERMIT";
+        addAuditEvent("permit_issued", "Issued 120s single-use HMAC permit " + permitId);
+        updateActionOutput({ step: "6. Single-Use 120s HMAC Permit Issued", permit: state.activePermit });
+        renderSelectedNodeDrilldown();
+        showToast("120s HMAC Permit Signed", "Single-use permit " + permitId + " ready for broker execution.", "ok");
+      }
+
+      function runExecuteAction() {
+        if (state.killSwitch) {
+          showToast("Execution Blocked", "Global Kill Switch is active.", "crit");
+          return;
+        }
+        const runId = "RUN-" + String(Math.floor(100 + Math.random() * 899));
+        if (state.activePermit) {
+          state.activePermit.consumed = true;
+        }
+        state.pipelineStage = "SOAK";
+        state.soakSamples = 1;
+        const node = monitors[state.selectedMonitorIndex];
+        node.temp = 73.5;
+        node.state = "maint";
+        state.cases[0].state = "POST_CHECK";
+        state.cases[0].temperature = 73.5;
+        state.cases[0].soak_samples = 1;
+
+        addAuditEvent("action_executed", "Executed " + runId + " on " + node.id + "; entered POST_CHECK soak hold (1/3 samples)");
+        updateActionOutput({
+          step: "7. Broker Execution Dispatched (POST_CHECK Soak Hold)",
+          execution_id: runId,
+          permit_consumed: true,
+          case_state: "POST_CHECK",
+          soak_samples: "1/3 (Case remains open until 3 consecutive healthy samples)"
+        });
+        renderMonitorMatrix();
+        renderBoxwatchCards();
+        renderSelectedNodeDrilldown();
+        showToast("Action Executed — Soak Hold Active", "Temp dropped to 73.5°C. Case held in POST_CHECK until 3 healthy samples.", "warn");
+      }
+
+      function runSoakSample() {
+        const node = monitors[state.selectedMonitorIndex];
+        state.soakSamples = Math.min(3, state.soakSamples + 1);
+        node.temp = Number(Math.max(62.0, node.temp - 2.4).toFixed(1));
+        state.cases[0].temperature = node.temp;
+        state.cases[0].soak_samples = state.soakSamples;
+
+        if (state.soakSamples >= 3) {
+          node.state = "ok";
+          node.availability = 99;
+          state.cases[0].state = "CLOSED";
+          state.pipelineStage = "OBSERVE";
+          addAuditEvent("case_closed", "Verified recovery on " + node.id + " after 3 healthy soak samples (" + node.temp + "°C)");
+          updateActionOutput({
+            step: "8. Verified Recovery Complete — Case CLOSED",
+            asset_id: node.id,
+            healthy_samples: 3,
+            final_temperature: node.temp,
+            case_state: "CLOSED"
+          });
+          showToast("Verified Recovery Complete!", "3/3 clean soak samples recorded. Case CLOSED.", "ok");
+        } else {
+          addAuditEvent("soak_sample", "Recorded healthy post-action sample " + state.soakSamples + "/3 (" + node.temp + "°C)");
+          updateActionOutput({
+            step: "8. Soak Verification In Progress",
+            asset_id: node.id,
+            healthy_samples: state.soakSamples + "/3",
+            current_temperature: node.temp
+          });
+          showToast("Soak Sample " + state.soakSamples + "/3 Recorded", "Need " + (3 - state.soakSamples) + " more clean sample(s) to close case.", "ok");
+        }
+        renderMonitorMatrix();
+        renderBoxwatchCards();
+        renderSelectedNodeDrilldown();
+      }
+
+      function invokeMcpTool(toolName) {
+        const zone = toolName.split(".")[0];
+        let records = [];
+        if (toolName === "fleet.get_observations") {
+          records = monitors.slice(0, 4).map(m => ({
+            id: "rcpt_" + m.id.replace(/[^a-z0-9]/g, ""),
+            sha256: pseudoSha256(m.id + ":" + m.temp),
+            environment: "simulation",
+            authority: "device",
+            retrieved_at: Math.floor(Date.now() / 1000) - 5,
+            max_age: 300,
+            body: {
+              asset_id: m.id,
+              temperature: m.temp,
+              observed_at: Math.floor(Date.now() / 1000) - 8,
+              timestamp_basis: "device"
+            }
+          }));
+        } else if (toolName === "records.get_cases") {
+          records = state.cases;
+        } else if (toolName === "records.get_plans") {
+          records = [
+            {
+              id: "plan_seed_001",
+              case_id: "case_seed_001",
+              asset_id: "rack1-node01",
+              status: state.planApproved ? "APPROVED" : "PROPOSED",
+              action: "thermal.throttle_workload",
+              estimated_cost_usd: "0.00"
+            }
+          ];
+        } else if (toolName === "market.get_tenders") {
+          records = state.vendorBids;
+        }
+
+        const rpcResponse = {
+          jsonrpc: "2.0",
+          id: 1,
+          zone: "watchermcp-" + zone,
+          endpoint: "/mcp/" + zone,
+          result: {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify(records, null, 2)
+              }
+            ],
+            isError: false
+          }
+        };
+        const pre = document.getElementById("mcp-rpc-output");
+        if (pre) {
+          pre.textContent = JSON.stringify(rpcResponse, null, 2);
+        }
+        showToast("MCP Tool Executed", toolName + " returned " + records.length + " read-only record(s).", "ok");
+      }
+
+      // ---------------------------------------------------------------------
+      // 6. POPUP CONTROLLERS (Start-of-Day Login & Something Goes Wrong)
+      // ---------------------------------------------------------------------
+      function openLoginModal() {
+        const m = document.getElementById("start-of-day-modal");
+        if (m) {
+          m.classList.remove("hidden");
+          m.classList.add("flex");
+        }
+      }
+
+      function closeLoginModal() {
+        const m = document.getElementById("start-of-day-modal");
+        if (m) {
+          m.classList.add("hidden");
+          m.classList.remove("flex");
+        }
+      }
+
+      function triggerIncidentPopup(customNode) {
+        const node = customNode || monitors[0];
+        node.temp = Math.max(88.4, Number((node.temp + 4.2).toFixed(1)));
+        node.state = "crit";
+        state.selectedMonitorIndex = monitors.indexOf(node) >= 0 ? monitors.indexOf(node) : 0;
+        state.thermalSeries.push(node.temp);
+        if (state.thermalSeries.length > 12) state.thermalSeries.shift();
+
+        document.getElementById("incident-modal-title").textContent =
+          "Thermal Excursion Detected on " + node.id + " (" + node.temp + "°C >= 80.0°C)";
+        document.getElementById("inc-asset").textContent = node.id + " (" + node.ip + ")";
+        document.getElementById("inc-temp").textContent = node.temp + "°C (Device Timestamp Basis — FRESH)";
+        document.getElementById("inc-hash").textContent = pseudoSha256(node.id + ":" + node.temp).slice(0, 36) + "...";
+        document.getElementById("bw-peak-temp").innerHTML = node.temp + '<span class="text-xs font-normal">°C</span>';
+        document.getElementById("chart-temp-badge").textContent = "Peak " + node.temp + "°C";
+
+        addAuditEvent("anomaly_alert", "Thermal spike (" + node.temp + "°C) triggered incident popup on " + node.id);
+
+        renderMonitorMatrix();
+        renderBoxwatchCards();
+        renderSelectedNodeDrilldown();
+        renderAllCharts();
+
+        const modal = document.getElementById("incident-alert-modal");
+        if (modal) {
+          modal.classList.remove("hidden");
+          modal.classList.add("flex");
+        }
+      }
+
+      function closeIncidentPopup() {
+        const modal = document.getElementById("incident-alert-modal");
+        if (modal) {
+          modal.classList.add("hidden");
+          modal.classList.remove("flex");
+        }
+      }
+
+      function switchTab(tabId) {
+        state.activeTab = tabId;
+        ["overview", "lifecycle", "tender", "mcp", "audit"].forEach(t => {
+          const panel = document.getElementById("tab-panel-" + t);
+          if (panel) {
+            if (t === tabId) panel.classList.remove("hidden");
+            else panel.classList.add("hidden");
+          }
+        });
+        document.querySelectorAll(".drill-tab-btn").forEach(btn => {
+          if (btn.getAttribute("data-tab") === tabId) {
+            btn.className = "drill-tab-btn px-3 py-1.5 rounded font-semibold bg-sky-500/20 text-sky-300 border border-sky-500/40";
+          } else {
+            btn.className = "drill-tab-btn px-3 py-1.5 rounded font-medium text-slate-400 hover:text-white hover:bg-slate-800/60";
+          }
+        });
+        if (tabId === "overview") {
+          setTimeout(renderAllCharts, 30);
+        }
+      }
+
+      // ---------------------------------------------------------------------
+      // 7. WIRE ALL EVENT LISTENERS & LIVE CLOCK
+      // ---------------------------------------------------------------------
+      function updateClock() {
+        const now = new Date();
+        const istOffsetMs = (5 * 60 + 30) * 60 * 1000;
+        const istDate = new Date(now.getTime() + (now.getTimezoneOffset() * 60000) + istOffsetMs);
+        let hours = istDate.getHours();
+        const mins = String(istDate.getMinutes()).padStart(2, "0");
+        const ampm = hours >= 12 ? "PM" : "AM";
+        hours = hours % 12 || 12;
+        const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+        const timeEl = document.getElementById("clock-time");
+        const dateEl = document.getElementById("clock-date");
+        if (timeEl) timeEl.textContent = String(hours).padStart(2, "0") + ":" + mins + " " + ampm;
+        if (dateEl) dateEl.textContent = String(istDate.getDate()).padStart(2, "0") + " " + months[istDate.getMonth()] + " " + istDate.getFullYear();
+
+        state.pollSeconds = (state.pollSeconds % 9) + 1;
+        const pollEl = document.getElementById("last-poll-seconds");
+        if (pollEl) pollEl.textContent = String(state.pollSeconds);
+      }
+
+      function initEvents() {
+        // Header Popup & Kill Switch controls
+        document.getElementById("btn-open-login-popup").addEventListener("click", openLoginModal);
+        document.getElementById("rail-btn-briefing").addEventListener("click", openLoginModal);
+        document.getElementById("btn-close-login-modal").addEventListener("click", closeLoginModal);
+
+        document.getElementById("btn-trigger-fault-popup").addEventListener("click", () => triggerIncidentPopup(monitors[0]));
+        document.getElementById("rail-btn-alarm").addEventListener("click", () => triggerIncidentPopup(monitors[0]));
+        document.getElementById("btn-inject-spike").addEventListener("click", () => triggerIncidentPopup(monitors[state.selectedMonitorIndex]));
+        document.getElementById("banner-btn-inspect").addEventListener("click", () => triggerIncidentPopup(monitors[0]));
+        document.getElementById("btn-close-incident-modal").addEventListener("click", closeIncidentPopup);
+
+        document.getElementById("btn-kill-switch").addEventListener("click", function () {
+          state.killSwitch = !state.killSwitch;
+          this.textContent = state.killSwitch ? "KILL SWITCH: ARMED (FROZEN)" : "KILL SWITCH: OFF";
+          this.className = state.killSwitch
+            ? "px-2.5 py-1 rounded text-xs font-mono-num font-bold bg-red-600 text-white border border-red-400"
+            : "px-2.5 py-1 rounded text-xs font-mono-num font-semibold bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-600 transition";
+          addAuditEvent("kill_switch", "Global Kill Switch set to " + state.killSwitch + " by " + state.role);
+          renderSelectedNodeDrilldown();
+          showToast(
+            state.killSwitch ? "Global Kill Switch ARMED" : "Global Kill Switch Disarmed",
+            state.killSwitch ? "All permits and broker executions are now frozen." : "Normal safety-gated operations resumed.",
+            state.killSwitch ? "crit" : "ok"
+          );
+        });
+
+        // Role selector sync
+        const roleSelect = document.getElementById("role-select");
+        const modalRolePicker = document.getElementById("modal-role-picker");
+        roleSelect.addEventListener("change", e => {
+          state.role = e.target.value;
+          modalRolePicker.value = state.role;
+          showToast("Active Role Switched", "Now operating as '" + state.role + "'.", "ok");
+        });
+        modalRolePicker.addEventListener("change", e => {
+          state.role = e.target.value;
+          roleSelect.value = state.role;
+        });
+
+        // Start-of-Day Login Form submit
+        document.getElementById("login-form").addEventListener("submit", e => {
+          e.preventDefault();
+          state.role = modalRolePicker.value;
+          roleSelect.value = state.role;
+          state.token = document.getElementById("token").value.trim() || "demo-token";
+          document.getElementById("main-panel").classList.remove("hidden");
+          closeLoginModal();
+          addAuditEvent("shift_login", "Operator authenticated for start-of-day shift as '" + state.role + "'");
+          renderSelectedNodeDrilldown();
+          showToast("Shift Authenticated", "Logged in as '" + state.role + "'. 256 Redfish monitors active.", "ok");
+        });
+
+        document.getElementById("btn-login-inspect-crit").addEventListener("click", () => {
+          closeLoginModal();
+          triggerIncidentPopup(monitors[0]);
+        });
+
+        // Incident Modal Action Buttons
+        document.getElementById("inc-btn-plan").addEventListener("click", () => {
+          closeIncidentPopup();
+          switchTab("lifecycle");
+          runPreparePlan();
+        });
+        document.getElementById("inc-btn-approve-permit").addEventListener("click", () => {
+          closeIncidentPopup();
+          switchTab("lifecycle");
+          runVerifyPlan();
+          runApprovePlan();
+          runIssuePermit();
+        });
+        document.getElementById("inc-btn-tender").addEventListener("click", () => {
+          closeIncidentPopup();
+          switchTab("tender");
+        });
+        document.getElementById("inc-btn-freeze").addEventListener("click", () => {
+          closeIncidentPopup();
+          document.getElementById("btn-kill-switch").click();
+        });
+
+        // Pipeline Buttons
+        document.getElementById("btn-observe").addEventListener("click", runObserve);
+        document.getElementById("btn-ticket").addEventListener("click", runPreparePlan);
+        document.getElementById("btn-verify").addEventListener("click", runVerifyPlan);
+        document.getElementById("btn-approve").addEventListener("click", runApprovePlan);
+        document.getElementById("btn-permit").addEventListener("click", runIssuePermit);
+        document.getElementById("btn-execute").addEventListener("click", runExecuteAction);
+        document.getElementById("btn-soak-sample").addEventListener("click", runSoakSample);
+        document.getElementById("banner-btn-remediate").addEventListener("click", () => {
+          switchTab("lifecycle");
+          runVerifyPlan();
+        });
+
+        // Tender re-score button
+        document.getElementById("btn-evaluate-tender").addEventListener("click", () => {
+          addAuditEvent("tender_scored", "Evaluated 3 replacement bids using 6-factor Decimal rubric; Apex DataCenter Parts ranked #1 (92.50)");
+          renderSelectedNodeDrilldown();
+          showToast("6-Factor Tender Evaluated", "Apex DataCenter Parts ($185.00) verified #1. Unverified lead scored 0.00.", "ok");
+        });
+
+        // Delegated clicks for Matrix Cells, Boxwatch Cards, Tabs, Left Rail, and MCP tools
+        document.addEventListener("click", e => {
+          const cell = e.target.closest("[data-monitor-idx]");
+          if (cell) {
+            const idx = parseInt(cell.getAttribute("data-monitor-idx"), 10);
+            if (!isNaN(idx) && monitors[idx]) {
+              state.selectedMonitorIndex = idx;
+              renderMonitorMatrix();
+              renderBoxwatchCards();
+              renderSelectedNodeDrilldown();
+              if (monitors[idx].state === "crit" || monitors[idx].state === "down") {
+                showToast("Critical Node Selected", monitors[idx].id + " is at " + monitors[idx].temp + "°C (" + monitors[idx].state.toUpperCase() + ").", "warn");
+              }
+            }
+            return;
+          }
+
+          const filterBtn = e.target.closest("[data-matrix-filter]");
+          if (filterBtn) {
+            state.matrixFilter = filterBtn.getAttribute("data-matrix-filter");
+            document.querySelectorAll(".matrix-filter-btn").forEach(b => {
+              b.classList.toggle("border-sky-400", b === filterBtn);
+            });
+            renderMonitorMatrix();
+            return;
+          }
+
+          const tabBtn = e.target.closest("[data-tab]");
+          if (tabBtn) {
+            switchTab(tabBtn.getAttribute("data-tab"));
+            return;
+          }
+
+          const navBtn = e.target.closest("[data-nav]");
+          if (navBtn) {
+            const target = navBtn.getAttribute("data-nav");
+            document.querySelectorAll(".nav-rail-btn").forEach(b => {
+              b.className = b === navBtn
+                ? "nav-rail-btn w-11 h-11 rounded-lg flex flex-col items-center justify-center bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 text-[10px] gap-0.5"
+                : "nav-rail-btn w-11 h-11 rounded-lg flex flex-col items-center justify-center text-slate-400 hover:text-white hover:bg-slate-800/60 text-[10px] gap-0.5";
+            });
+            if (target === "overview" || target === "redfish") switchTab("overview");
+            else if (target === "lifecycle") switchTab("lifecycle");
+            else if (target === "tender") switchTab("tender");
+            else if (target === "mcp") switchTab("mcp");
+            else if (target === "audit") switchTab("audit");
+            return;
+          }
+
+          const mcpBtn = e.target.closest("[data-mcp-tool]");
+          if (mcpBtn) {
+            invokeMcpTool(mcpBtn.getAttribute("data-mcp-tool"));
+          }
+        });
+
+        window.addEventListener("resize", renderAllCharts);
+      }
+
+      // Initialize application on load
+      window.addEventListener("DOMContentLoaded", () => {
+        renderMonitorMatrix();
+        renderBoxwatchCards();
+        renderSelectedNodeDrilldown();
+        updateActionOutput({
+          status: "Awaiting Plan Verification & Approval",
+          active_case: state.cases[0],
+          safety_invariants: [
+            "Read-only MCP tools across fleet, records, and market zones",
+            "Canonical JSON SHA-256 plan binding",
+            "120-second single-use HMAC permits",
+            "3-sample post-action soak recovery check"
+          ]
+        });
+        invokeMcpTool("fleet.get_observations");
+        initEvents();
+        updateClock();
+        setInterval(updateClock, 2000);
+        setTimeout(renderAllCharts, 60);
+      });
+    })();
+  </script>
+</body>
+</html>
