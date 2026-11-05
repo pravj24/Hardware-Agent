@@ -22,19 +22,14 @@ from .hackathon import Hackathon
 
 
 class APIServer:
-<<<<<<< HEAD
-    def __init__(self, app, collector, *, identities, host="127.0.0.1", port=8080, hackathon=False):
-        if host not in {"127.0.0.1", "localhost"}:
-            raise ValueError("development API must bind to loopback")
-        self.app, self.collector, self.identities = app, collector, identities
-        self.onboarding = Onboarding(app, collector)
-        self.demo = Hackathon(app, collector, enabled=hackathon)
-=======
-    def __init__(self, app, collector, *, identities, discovery=None, host="127.0.0.1", port=8080):
+    def __init__(self, app, collector, *, identities, discovery=None, assist=None,
+                 host="127.0.0.1", port=8080, hackathon=False):
         if host not in {"127.0.0.1", "localhost"}:
             raise ValueError("development API must bind to loopback")
         self.app, self.collector, self.identities, self.discovery = app, collector, identities, discovery
->>>>>>> 6e673dc062b3177031727584d00ba626759be337
+        self.assist = assist
+        self.onboarding = Onboarding(app, collector)
+        self.demo = Hackathon(app, collector, enabled=hackathon)
         self.thread = None
         api = self
         static = Path(__file__).parent / "web"
@@ -145,8 +140,8 @@ class APIServer:
                     "/api/approve": {"operator", "procurement", "finance"},
                     "/api/permit": {"operator", "procurement"}, "/api/execute": {"operator", "procurement"},
                     "/api/reconcile": {"operator", "procurement"}, "/api/controls": {"policy_admin"},
-<<<<<<< HEAD
-                    "/api/tender/compare": {"procurement"},
+                    "/api/tender/compare": {"procurement"}, "/api/tender/discover": {"procurement"},
+                    "/api/tender/score": {"procurement"}, "/api/assist": {"operator", "procurement"},
                     "/api/onboarding/start": {"policy_admin"},
                     "/api/onboarding/sample": {"policy_admin"},
                     "/api/onboarding/configure": {"policy_admin"},
@@ -159,10 +154,6 @@ class APIServer:
                 if api.demo.enabled:
                     permissions.update({"/api/demo/" + action: {"policy_admin"} for action in
                                         ["prepare", "step", "refresh", "incident", "draft", "tender", "assistant", "recover", "offboard", "restart"]})
-=======
-                    "/api/tender/compare": {"procurement"}, "/api/tender/discover": {"procurement"},
-                    "/api/tender/score": {"procurement"}}
->>>>>>> 6e673dc062b3177031727584d00ba626759be337
                 if route not in permissions:
                     return self.send(404, {"error": "route not found"})
                 if identity["role"] not in permissions[route]:
@@ -276,6 +267,10 @@ class APIServer:
                 raise Rejected("qualification scoring in this release is simulation-only")
             result = rank_candidates(body["candidates"], weights=body.get("weights"))
             return self._record_tender("shortlist", "candidates_scored", result, identity)
+        if route == "/api/assist":
+            if not self.assist:
+                raise Rejected("assistant not configured")
+            return self.assist.run(prompt=body["prompt"], task=body.get("task"), identity=identity)
         raise Rejected("unknown action")
 
     def _record_tender(self, kind, event, result, identity):

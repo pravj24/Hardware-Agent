@@ -30,6 +30,7 @@ what is fixture-only, and what remains unimplemented.
 | Tender scoring | Six-factor weighted qualification rubric (customer-overridable, must sum to 100); pre-qualification must be verified at source to rank; each unverified factor scores zero, not partial; Crustdata signals carried as corroboration only, never authoritative; exact Decimal arithmetic |
 | Tender comparison | Reviewed simulation inputs, qualification/screening/availability flags, quote reference and expiry, exact Decimal arithmetic, scope/quantity consistency, no implicit currency conversion |
 | Interfaces | Authenticated local API, operations dashboard, three read-only MCP stdio zones |
+| Dashboard assistant | Server-side LLM over a provider-neutral, bounded, append-only tool-use loop that drafts maintenance messages, approval summaries and tender searches. Providers: Zhipu AI / GLM (`glm-4.6`, OpenAI-compatible, stdlib urllib, no SDK) or Claude (`claude-opus-5-5`, official SDK lazily imported), chosen from the environment; offline stub without a key. Tools are read/draft-only (case evidence, Crustdata discovery, recent tenders); it cannot approve, send or execute, and is instructed to use only tool-returned figures. Each invocation is audited to the ledger |
 | Verification lab | Stateful in-process fixture server plus a separate actual DMTF integration pinned to a commit |
 | CI | Python 3.11/3.13 on Windows/Linux; separate upstream DMTF job |
 

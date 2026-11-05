@@ -6,6 +6,7 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from overwatch.api import APIServer
+from overwatch.assist import Assistant, StubClient
 from overwatch.discovery import FixtureDiscoveryClient
 from overwatch.redfish import RedfishClient, SimulationAdapter
 from overwatch.service import Overwatch
@@ -21,7 +22,8 @@ class APITests(unittest.TestCase):
         self.client = RedfishClient(self.lab.url)
         self.app = Overwatch(Path(self.temp.name) / "db.sqlite", b"x" * 32,
                              adapter=SimulationAdapter(self.client), soak_seconds=0)
-        self.server = APIServer(self.app, self.client, port=0, discovery=FixtureDiscoveryClient(), identities={
+        self.server = APIServer(self.app, self.client, port=0, discovery=FixtureDiscoveryClient(),
+            assist=Assistant(self.app, client=StubClient(), discovery=FixtureDiscoveryClient()), identities={
             "operator-secret": {"actor": "sre", "role": "operator"},
             "viewer-secret": {"actor": "reader", "role": "viewer"},
             "procurement-secret": {"actor": "buyer", "role": "procurement"},
@@ -119,3 +121,10 @@ class APITests(unittest.TestCase):
 
         kinds = {t["kind"] for t in self.app.snapshot()["tenders"]}
         self.assertEqual(kinds, {"discovery", "shortlist"})
+
+    def test_assist_is_role_gated_and_returns_a_draft(self):
+        self.assertEqual(self.request("/api/assist", {"prompt": "draft"}, token="viewer-secret")[0], 403)
+        status, body = self.request("/api/assist", {"prompt": "draft a maintenance note"})
+        self.assertEqual(status, 200)
+        self.assertEqual(body["status"], "DRAFT_ONLY")
+        self.assertIn("reply", body)

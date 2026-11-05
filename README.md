@@ -56,7 +56,28 @@ This does not connect enterprise SSO, vaults, external systems or AI clients. Im
 coverage and integration checks are fixture assertions; production readiness remains
 blocked. See [phase-by-phase status and walkthrough](docs/onboarding-status.md).
 
-## Verification commands
+### AI assistant (dashboard, drafts only)
+
+The **Tenders** view includes a server-side LLM assistant that drafts maintenance messages, approval-request summaries and provider/tender searches. It is the dashboard-native LLM path, distinct from the MCP servers (which expose tools to Claude Code as an external client). It runs a provider-neutral tool-use loop with three **read/draft-only** tools (`discover_providers`, `get_case_evidence`, `get_recent_tenders`); it cannot approve, send or execute — those stay on the authenticated policy/broker path — and it is instructed to use only figures returned by the tools (receipts, case facts), never invented numbers.
+
+The provider is chosen from the environment — Zhipu AI first, then Claude, else an offline stub:
+
+```powershell
+# Option A — Zhipu AI / GLM (no SDK needed; pure stdlib over the OpenAI-compatible API)
+$env:ZHIPU_API_KEY = "..."           # defaults: model glm-4.6, endpoint api.z.ai
+#   ZHIPU_MODEL and ZHIPU_BASE_URL override (set ZHIPU_BASE_URL to the
+#   open.bigmodel.cn endpoint for the China platform)
+
+# Option B — Claude (official anthropic SDK, lazily imported)
+pip install "watchermcp[assist]"     # or: pip install anthropic
+$env:ANTHROPIC_API_KEY = "sk-ant-..."  # model claude-opus-5-5
+
+python -m overwatch demo
+```
+
+Without any key the assistant runs in an offline stub so the endpoint still responds; the live tool-calling loop needs a key. Zhipu requires no extra install (stdlib `urllib`); only the Claude path needs the `anthropic` SDK, imported lazily, so the app, demo and default tests keep running with no dependency installed.
+
+## Test-driven implementation
 
 ```powershell
 python -m unittest discover -s tests -v
@@ -139,6 +160,7 @@ overwatch/
   api.py           Authenticated loopback API and UI hosting
   mcp.py           Read-only stdio tools split by trust zone
   tender.py        Deterministic bid eligibility and comparison
+  assist.py        Dashboard LLM assistant (Zhipu/GLM or Claude); read/draft-only tools
   discovery.py     Crustdata provider discovery (live client + keyless fixture), compliance screen
   scoring.py       Weighted qualification rubric; unverified factors score zero
   web/             Operations desk
