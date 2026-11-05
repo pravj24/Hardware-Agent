@@ -1,0 +1,7 @@
+{
+  "repository": "https://github.com/DMTF/Redfish-Mockup-Server.git",
+  "commit": "23d21f9a3610f6b6fbb71ffc941296b159a524d2",
+  "fixture": "public-rackmount1",
+  "short_form": true,
+  "purpose": "Collector contract tests and limited action-response semantics; not hardware validation"
+}
