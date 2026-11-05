@@ -32,7 +32,6 @@ class APIServer:
         self.demo = Hackathon(app, collector, enabled=hackathon)
         self.thread = None
         api = self
-        static = Path(__file__).parent / "web"
 
         class Handler(BaseHTTPRequestHandler):
             def setup(self):
@@ -42,6 +41,16 @@ class APIServer:
             def log_message(self, *args):
                 pass
 
+            def cors(self):
+                # API-only server: the dashboard frontend is deployed separately and calls
+                # this backend cross-origin. Auth is a bearer token in a header (never a
+                # cookie), so reflecting the Origin for CORS does not expose it to CSRF.
+                origin = self.headers.get("Origin")
+                self.send_header("Access-Control-Allow-Origin", origin or "*")
+                self.send_header("Vary", "Origin")
+                self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type")
+                self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+
             def send(self, code, body, content_type="application/json"):
                 payload = json.dumps(body, allow_nan=False).encode() if content_type == "application/json" else body
                 self.send_response(code)
@@ -49,10 +58,15 @@ class APIServer:
                 self.send_header("Content-Length", str(len(payload)))
                 self.send_header("Cache-Control", "no-store")
                 self.send_header("X-Content-Type-Options", "nosniff")
-                self.send_header("X-Frame-Options", "DENY")
-                self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'")
+                self.cors()
                 self.end_headers()
                 self.wfile.write(payload)
+
+            def do_OPTIONS(self):
+                self.send_response(204)
+                self.send_header("Content-Length", "0")
+                self.cors()
+                self.end_headers()
 
             def identity(self):
                 supplied = self.headers.get("Authorization", "")
@@ -62,27 +76,12 @@ class APIServer:
                 return next((identity for candidate, identity in api.identities.items()
                              if hmac.compare_digest(candidate, token)), None)
 
-            def boundary(self):
-                allowed = {"127.0.0.1:" + str(api.server.server_port), "localhost:" + str(api.server.server_port)}
-                if self.headers.get("Host") not in allowed:
-                    return False
-                origin = self.headers.get("Origin")
-                return not origin or origin in {"http://" + name for name in allowed}
-
             def do_GET(self):
-                if not self.boundary():
-                    return self.send(403, {"error": "origin or host rejected"})
                 route = urlsplit(self.path).path
-                assets = {"/": ("index.html", "text/html; charset=utf-8"),
-                          "/app.js": ("app.js", "text/javascript; charset=utf-8"),
-                          "/onboarding.js": ("onboarding.js", "text/javascript; charset=utf-8"),
-                          "/hackathon.js": ("hackathon.js", "text/javascript; charset=utf-8"),
-                          "/style.css": ("style.css", "text/css; charset=utf-8")}
-                if route in assets:
-                    filename, kind = assets[route]
-                    return self.send(200, (static / filename).read_bytes(), kind)
-                if route == "/healthz":
-                    return self.send(200, {"status": "ok", "environment": app.environment})
+                if route in ("/", "/healthz"):
+                    return self.send(200, {"status": "ok", "service": "watchermcp-api",
+                                           "environment": app.environment,
+                                           "notice": "API-only backend; the dashboard frontend is deployed separately"})
                 if route == "/api/demo/config":
                     return self.send(200, {"enabled": api.demo.enabled})
                 identity = self.identity()
@@ -120,8 +119,6 @@ class APIServer:
                         return self.send(400, {"error": "incomplete request body"})
                 except (ValueError, OSError):
                     return self.send(400, {"error": "invalid request body"})
-                if not self.boundary():
-                    return self.send(403, {"error": "origin or host rejected"})
                 # Explicit loopback hackathon mode only. Never available in normal mode.
                 if urlsplit(self.path).path == "/api/demo/login":
                     if not api.demo.enabled:

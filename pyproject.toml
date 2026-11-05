@@ -23,6 +23,3 @@ watchermcp = "overwatch.__main__:main"
 
 [tool.setuptools.packages.find]
 include = ["overwatch*"]
-
-[tool.setuptools.package-data]
-overwatch = ["web/*.html", "web/*.css", "web/*.js"]

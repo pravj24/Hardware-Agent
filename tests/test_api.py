@@ -43,9 +43,11 @@ class APITests(unittest.TestCase):
     def test_api_requires_authentication(self):
         self.assertEqual(self.request("/api/state", token="wrong")[0], 401)
 
-    def test_foreign_origin_and_host_are_rejected(self):
-        self.assertEqual(self.request("/api/state", Origin="https://attacker.invalid")[0], 403)
-        self.assertEqual(self.request("/api/state", Host="attacker.invalid")[0], 403)
+    def test_cross_origin_is_allowed_with_a_valid_token(self):
+        # API-only backend: the separately-deployed dashboard frontend calls it cross-origin.
+        # Auth is a bearer token in a header (never a cookie), so CORS is safe here.
+        self.assertEqual(self.request("/api/state", Origin="https://dashboard.example")[0], 200)
+        self.assertEqual(self.request("/api/state", Origin="https://dashboard.example", token="wrong")[0], 401)
 
     def test_role_cannot_be_supplied_by_request_body(self):
         self.request("/api/scenario", {"scenario": "degraded"})
@@ -89,10 +91,19 @@ class APITests(unittest.TestCase):
         self.assertEqual(self.request("/api/controls", {"kill_switch": True})[0], 403)
         self.assertEqual(self.request("/api/controls", {"kill_switch": True}, token="admin-secret")[0], 200)
 
-    def test_dashboard_and_static_assets_are_served(self):
-        for path, marker in [("/", b"WatcherMCP"), ("/app.js", b"api/state"), ("/style.css", b"font-family")]:
-            with urlopen(self.server.url + path) as response:
-                self.assertIn(marker, response.read())
+    def test_root_is_an_api_descriptor_and_no_ui_is_served(self):
+        with urlopen(self.server.url + "/") as response:
+            body = json.load(response)
+        self.assertEqual(body["service"], "watchermcp-api")
+        self.assertEqual(self.request("/app.js")[0], 404)  # UI assets are no longer served here
+
+    def test_options_preflight_returns_cors(self):
+        from urllib.request import Request
+        req = Request(self.server.url + "/api/state", method="OPTIONS",
+                      headers={"Origin": "https://dashboard.example"})
+        with urlopen(req) as response:
+            self.assertEqual(response.status, 204)
+            self.assertEqual(response.headers.get("Access-Control-Allow-Origin"), "https://dashboard.example")
 
     def test_unknown_route_returns_json_error(self):
         self.assertEqual(self.request("/api/not-a-route", {})[0], 404)

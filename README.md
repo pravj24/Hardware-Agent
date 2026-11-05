@@ -82,7 +82,6 @@ Without any key the assistant runs in an offline stub so the endpoint still resp
 ```powershell
 python -m unittest discover -s tests -v
 python -m compileall -q overwatch
-node --check overwatch/web/app.js
 ```
 
 Node is needed only for the optional JavaScript syntax check. Three DMTF integration tests are skipped unless their environment variables are set. The main tests run real local HTTP servers and require permission to use loopback sockets.

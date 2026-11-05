@@ -26,8 +26,6 @@ jobs:
         run: python -W error::ResourceWarning -m unittest discover -s tests -v
       - name: Compile source
         run: python -m compileall -q overwatch
-      - name: Validate browser JavaScript
-        run: node --check overwatch/web/app.js
   upstream-redfish:
     runs-on: ubuntu-latest
     steps:

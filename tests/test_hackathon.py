@@ -174,7 +174,8 @@ class HackathonJourneyTests(unittest.TestCase):
     def test_http_demo_login_explicit_flag_origin_and_mutation_authorization(self):
         self.assertTrue(self.request("/api/demo/config", token="wrong")[1]["enabled"])
         self.assertEqual(self.request("/api/demo/login", {}, token="wrong")[1]["token"], "presenter")
-        self.assertEqual(self.request("/api/demo/login", {}, Origin="https://foreign.invalid")[0], 403)
+        # API-only backend with CORS: the separately-deployed dashboard calls it cross-origin.
+        self.assertEqual(self.request("/api/demo/login", {}, Origin="https://dashboard.example")[0], 200)
         self.assertEqual(self.request("/api/demo/prepare", {}, token="viewer")[0], 403)
         self.assertEqual(self.request("/api/demo/prepare", {"name": "Demo company"})[0], 200)
         self.assertEqual(self.request("/api/demo/step", {"step": "identity"})[0], 200)

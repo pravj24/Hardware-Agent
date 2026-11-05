@@ -108,8 +108,9 @@ def main():
             app.recover_inflight()
             api = APIServer(app, client, identities=identities, discovery=discovery,
                             assist=assistant, hackathon=hackathon, port=args.port).start()
-            print(f"Operations desk: {api.url}", flush=True)
-            print("Open the desk and paste the operator token. Ctrl+C stops both services.", flush=True)
+            print(f"Overwatch API (backend): {api.url}", flush=True)
+            print("Point the dashboard frontend (frontend/) at this URL as its API base and connect "
+                  "with a role token from the credentials file. Ctrl+C stops both services.", flush=True)
             if hackathon:
                 print("HACKATHON: use Enter hackathon demo; all enterprise people/data are fictional. Recovery uses three samples with a zero-second soak.", flush=True)
         while True:
