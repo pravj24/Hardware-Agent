@@ -164,6 +164,7 @@ class ZhipuClient:
                 detail = " (" + str(error.get("code")) + ": " + str(error.get("message")) + ")"
             except (ValueError, TypeError, AttributeError):
                 pass
+            exc.close()  # release the wrapped socket (avoids a Windows ResourceWarning)
             raise Rejected("Zhipu request failed: HTTP " + str(exc.code) + detail) from exc
         except (urllib.error.URLError, TimeoutError, ValueError, OSError) as exc:
             raise Rejected("Zhipu request failed: " + str(exc)) from exc

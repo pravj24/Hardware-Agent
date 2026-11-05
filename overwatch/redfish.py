@@ -72,6 +72,11 @@ class RedfishClient:
                     raise RedfishError("resource must be a JSON object")
                 return result
         except (HTTPError, URLError, OSError, ValueError) as exc:
+            # An HTTPError (e.g. the simulated 503 outage) wraps an open socket; close it so
+            # Windows does not later leak it and emit a ResourceWarning that CI's
+            # `python -W error::ResourceWarning` turns into a fatal failure.
+            if isinstance(exc, HTTPError):
+                exc.close()
             # Do not include headers or credentials in diagnostics.
             raise RedfishError(f"Redfish {method} failed: {type(exc).__name__}") from exc
 

@@ -53,6 +53,8 @@ class CrustdataClient:
             with self._opener(request, timeout=self.timeout) as response:
                 payload = json.loads(response.read())
         except (urllib.error.URLError, TimeoutError, ValueError, OSError) as exc:
+            if isinstance(exc, urllib.error.HTTPError):
+                exc.close()  # close the wrapped socket so it cannot leak a ResourceWarning
             raise DiscoveryError("Crustdata unavailable") from exc
         if not isinstance(payload, dict) or not isinstance(payload.get("companies"), list):
             raise DiscoveryError("unexpected Crustdata response")
