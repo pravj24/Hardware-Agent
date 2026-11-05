@@ -7,7 +7,10 @@ name = "watchermcp"
 version = "0.1.0"
 description = "Evidence-first hardware operations and Redfish verification lab"
 requires-python = ">=3.11"
-dependencies = []
+# Linux/macOS use the system IANA timezone database; Windows ships none, and the
+# onboarding rehearsal validates site timezones with zoneinfo.ZoneInfo, so tzdata is
+# required there. No runtime dependency is added on Linux/macOS.
+dependencies = ["tzdata; platform_system == 'Windows'"]
 
 # Core app, demo and default tests use only the standard library. The assist feature's
 # live LLM path is the one optional dependency; it is imported lazily and only needed
