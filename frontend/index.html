@@ -1760,20 +1760,44 @@
         if (!res.ok) throw new Error(data.error || ("HTTP " + res.status));
         return data;
       }
+      // Real onboarding demo snapshot (sample config loaded + identity gate signed),
+      // captured from the backend. Rendered when no live backend is connected.
       const OB_SIM = {
-        started: true, revision: 3, stage: "SETUP", shadow_status: "NOT_STARTED",
+        started: true, revision: 2, stage: "SETUP", shadow_status: "NOT_STARTED",
         ready_for_simulated_shadow: false,
         gates: [
-          { id: "identity", title: "1 · Tenant and identity", status: "passed", criterion: "Tenant settings, role mappings, SSO/SCIM/step-up.", blockers: [], missing_signers: [], signatures: [] },
-          { id: "inventory", title: "2 · Sites and hardware", status: "at_risk", criterion: "≥95% matched declared assets; zero untriaged discoveries.", blockers: [], missing_signers: ["infrastructure_lead"], signatures: [] },
-          { id: "telemetry", title: "3 · Collectors and credentials", status: "blocked", criterion: "≥90% coverage for 7 days; read-only probe.", blockers: ["Run a fresh Redfish read-only probe."], missing_signers: ["operator", "security_lead"], signatures: [] },
-          { id: "connectors", title: "4 · Systems of record", status: "blocked", criterion: "Seven read-only connectors certified by owners.", blockers: ["Certify the seven connectors."], missing_signers: ["iam_lead"], signatures: [] },
-          { id: "policy", title: "5 · Policy release", status: "blocked", criterion: "Two reviewers, 30-day replay, all actions T0.", blockers: ["Two independent reviewers required."], missing_signers: ["risk_lead", "security_lead"], signatures: [] },
-          { id: "ai", title: "6 · Enterprise AI clients (optional)", status: "not_required", criterion: "OAuth MCP gateway + read/propose scopes.", blockers: [], missing_signers: [], signatures: [] }
+          { id: "identity", title: "1 · Tenant and identity", status: "passed",
+            criterion: "Tenant settings, six role mappings, 100% approval-authority coverage, SSO, SCIM and step-up test.",
+            blockers: [], missing_signers: [] },
+          { id: "inventory", title: "2 · Sites and hardware", status: "blocked",
+            criterion: "At least 95% matched declared assets; zero untriaged discovered assets.",
+            blockers: ["At least 95% of declared devices must match the Redfish probe."],
+            missing_signers: ["infrastructure_lead"] },
+          { id: "telemetry", title: "3 · Collectors and credentials", status: "blocked",
+            criterion: "At least 90% coverage for seven continuous days; no excess rights; collector per site (two for tier 1).",
+            blockers: ["Run a fresh Redfish read-only privilege and telemetry probe (valid for five minutes).",
+                       "At least 90% of matched devices need seven continuous days of coverage (fixture history only here)."],
+            missing_signers: ["operator", "security_lead"] },
+          { id: "connectors", title: "4 · Systems of record", status: "at_risk",
+            criterion: "All seven required connectors certified by their owners; read-only access.",
+            blockers: [],
+            missing_signers: ["iam_lead", "security_lead", "operator", "infrastructure_lead", "maintenance_lead", "change_lead", "collaboration_lead"] },
+          { id: "policy", title: "5 · Policy release", status: "at_risk",
+            criterion: "Two independent reviewers, 30-day replay, required policy settings, every action at T0.",
+            blockers: [], missing_signers: ["risk_lead", "security_lead"] },
+          { id: "ai", title: "6 · Enterprise AI clients (optional)", status: "not_required",
+            criterion: "Optional pilot of 5–10 users, one week of audit review; read/propose scopes only.",
+            blockers: [], missing_signers: [] }
         ],
         production_blockers: [
           "SSO/OIDC/SAML, SCIM and fresh MFA are not connected; local tokens are rehearsal identities.",
-          "This is the in-browser simulation — connect a live backend for the real rehearsal."
+          "Customer vault access, encryption key custody and residency enforcement are not implemented.",
+          "Edge enrollment, mutual TLS, certificate rotation and redundant collectors are not deployed.",
+          "Only the local Redfish fixture is probed; seven days of real fleet coverage are not established.",
+          "DCIM/CMDB, CMMS, change calendar and messaging adapters are not certified.",
+          "Independent policy service, live historical replay and enterprise approval authority are not integrated.",
+          "The OAuth MCP gateway is implemented; a real SSO-backed client pilot and gateway audit review across 5–10 users remain outstanding.",
+          "Eight to twelve weeks of real shadow outcomes and promotion evidence remain outstanding."
         ]
       };
       function renderOnboarding(snap) {
