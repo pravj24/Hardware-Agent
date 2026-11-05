@@ -11,17 +11,25 @@ tools to Claude Code as an external client). The safety boundary is unchanged:
     back from the tools (receipts, case facts) and are returned to the caller alongside
     the draft so the dashboard can show the evidence the text is built on.
 
-The live client uses the official Anthropic SDK, imported lazily so the app, demo and
-default tests keep the repo's stdlib-only, no-API-key invariant. Without a key the
-endpoint runs a stub client; the real tool-calling loop is exercised by the live client
-and by the tests' scripted client.
+The loop is provider-neutral: a client only implements ``complete(system, messages,
+tools)`` over the internal block format. Two live providers ship - Claude (official
+Anthropic SDK, lazily imported) and Zhipu AI / GLM (OpenAI-compatible REST over stdlib
+urllib, no SDK). ``choose_assist_client`` selects one from the environment; without any
+key the endpoint runs a stub. The app, demo and default tests keep the repo's
+stdlib-only, no-API-key invariant, and the real tool-calling loop is exercised by the
+tests' scripted and fake-transport clients.
 """
 import json
+import os
+import urllib.error
+import urllib.request
 
 from .discovery import discover_providers
 from .errors import Rejected
 
 MODEL = "claude-opus-5-5"
+ZHIPU_MODEL = "glm-4.6"
+ZHIPU_URL = "https://api.z.ai/api/paas/v4/chat/completions"
 MAX_STEPS = 4
 MAX_TOKENS = 4096
 
@@ -96,6 +104,87 @@ class ClaudeClient:
                 blocks.append({"type": "tool_use", "id": block.id, "name": block.name, "input": block.input})
         # Append the SDK blocks unchanged (append-only; preserves any thinking blocks).
         return {"stop_reason": response.stop_reason, "blocks": blocks, "assistant_content": response.content}
+
+
+class ZhipuClient:
+    """Zhipu AI / GLM via its OpenAI-compatible chat-completions API, over stdlib urllib.
+
+    Needs no SDK. Reads ZHIPU_API_KEY; ZHIPU_BASE_URL and ZHIPU_MODEL override the
+    international defaults (set ZHIPU_BASE_URL to the open.bigmodel.cn endpoint for the
+    China platform). Translates the internal block format to and from OpenAI tool calls.
+    """
+
+    def __init__(self, token, *, url=None, model=None, max_tokens=MAX_TOKENS, timeout=60, opener=None):
+        if not token:
+            raise Rejected("Zhipu API key required")
+        self.token = token
+        self.url = url or os.environ.get("ZHIPU_BASE_URL") or ZHIPU_URL
+        self.model = model or os.environ.get("ZHIPU_MODEL") or ZHIPU_MODEL
+        self.max_tokens, self.timeout = max_tokens, timeout
+        self._opener = opener or urllib.request.urlopen
+
+    @staticmethod
+    def _to_openai(system, messages, tools):
+        out = [{"role": "system", "content": system}]
+        for message in messages:
+            content = message["content"]
+            if message["role"] == "user":
+                if isinstance(content, str):
+                    out.append({"role": "user", "content": content})
+                else:  # tool_result blocks become separate role:"tool" messages
+                    for block in content:
+                        out.append({"role": "tool", "tool_call_id": block["tool_use_id"],
+                                    "content": block["content"]})
+            else:  # assistant: text + tool_use blocks
+                text = "".join(b["text"] for b in content if b.get("type") == "text")
+                calls = [{"id": b["id"], "type": "function",
+                          "function": {"name": b["name"], "arguments": json.dumps(b["input"])}}
+                         for b in content if b.get("type") == "tool_use"]
+                entry = {"role": "assistant", "content": text or None}
+                if calls:
+                    entry["tool_calls"] = calls
+                out.append(entry)
+        functions = [{"type": "function", "function": {"name": t["name"], "description": t["description"],
+                      "parameters": t["input_schema"]}} for t in tools]
+        return out, functions
+
+    def complete(self, *, system, messages, tools):
+        openai_messages, functions = self._to_openai(system, messages, tools)
+        body = json.dumps({"model": self.model, "messages": openai_messages, "tools": functions,
+                           "tool_choice": "auto", "max_tokens": self.max_tokens}).encode()
+        request = urllib.request.Request(self.url, data=body, method="POST", headers={
+            "Content-Type": "application/json", "Authorization": "Bearer " + self.token})
+        try:
+            with self._opener(request, timeout=self.timeout) as response:
+                payload = json.loads(response.read())
+        except (urllib.error.URLError, TimeoutError, ValueError, OSError) as exc:
+            raise Rejected("Zhipu request failed: " + str(exc)) from exc
+        choices = payload.get("choices")
+        if not choices:
+            raise Rejected("Zhipu returned no choices")
+        msg = choices[0].get("message", {})
+        blocks = []
+        if msg.get("content"):
+            blocks.append({"type": "text", "text": msg["content"]})
+        for call in msg.get("tool_calls") or []:
+            arguments = call.get("function", {}).get("arguments", "{}")
+            try:
+                parsed = json.loads(arguments) if isinstance(arguments, str) else (arguments or {})
+            except ValueError:
+                parsed = {}
+            blocks.append({"type": "tool_use", "id": call.get("id", "call_0"),
+                           "name": call.get("function", {}).get("name"), "input": parsed})
+        stop_reason = "tool_use" if any(b["type"] == "tool_use" for b in blocks) else "end_turn"
+        return {"stop_reason": stop_reason, "blocks": blocks, "assistant_content": blocks}
+
+
+def choose_assist_client():
+    """Pick a provider from the environment: Zhipu, then Claude, else the offline stub."""
+    if os.environ.get("ZHIPU_API_KEY"):
+        return ZhipuClient(os.environ["ZHIPU_API_KEY"])
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        return ClaudeClient()
+    return StubClient()
 
 
 class Assistant:

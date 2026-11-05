@@ -8,7 +8,7 @@ import sys
 import time
 
 from .api import APIServer
-from .assist import Assistant, ClaudeClient, StubClient
+from .assist import Assistant, choose_assist_client
 from .discovery import CrustdataClient, FixtureDiscoveryClient
 from .mcp import MCPServer
 from .redfish import RedfishClient, SimulationAdapter
@@ -91,10 +91,9 @@ def main():
             # with real captured third-party-maintainer records, so the demo needs no account.
             token = os.environ.get("WATCHER_CRUSTDATA_TOKEN")
             discovery = CrustdataClient(token) if token else FixtureDiscoveryClient()
-            # Dashboard-native LLM: live Claude when ANTHROPIC_API_KEY is set, else an
-            # offline stub so the demo and endpoint still work without a key or the SDK.
-            assist_client = ClaudeClient() if os.environ.get("ANTHROPIC_API_KEY") else StubClient()
-            assistant = Assistant(app, client=assist_client, discovery=discovery)
+            # Dashboard-native LLM: Zhipu (ZHIPU_API_KEY) or Claude (ANTHROPIC_API_KEY),
+            # else an offline stub so the demo and endpoint still work with no key.
+            assistant = Assistant(app, client=choose_assist_client(), discovery=discovery)
             # In-flight actions survive application restarts; simulator restarts do not recreate lost remote outcomes.
             app.recover_inflight()
             api = APIServer(app, client, identities=identities, discovery=discovery,
