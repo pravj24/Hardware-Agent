@@ -1,0 +1,24 @@
+# Smithery MCP Directory configuration for WatcherMCP
+# Place inside `deploy/smithery.yaml` (or copy to repo root if required by your Smithery settings)
+runtime: "container"
+build:
+  dockerfile: "deploy/Dockerfile"
+  dockerBuildPath: ".."
+startCommand:
+  type: "http"
+  configSchema:
+    type: "object"
+    properties:
+      zone:
+        type: "string"
+        enum: ["all", "fleet", "records", "market"]
+        default: "all"
+        description: "Trust zone(s) to expose over HTTP/SSE (fleet, records, market, or all)."
+      seedDemo:
+        type: "boolean"
+        default: true
+        description: "Seed initial simulation telemetry receipts, cases, plans, and tender records if the SQLite database is empty."
+      authToken:
+        type: "string"
+        description: "Optional Bearer token to require on /mcp/* requests."
+    required: []

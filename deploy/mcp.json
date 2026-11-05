@@ -1,0 +1,28 @@
+{
+  "mcpServers": {
+    "watcher-fleet-web": {
+      "type": "streamable-http",
+      "url": "http://127.0.0.1:8090/mcp/fleet"
+    },
+    "watcher-records-web": {
+      "type": "streamable-http",
+      "url": "http://127.0.0.1:8090/mcp/records"
+    },
+    "watcher-market-web": {
+      "type": "streamable-http",
+      "url": "http://127.0.0.1:8090/mcp/market"
+    },
+    "watcher-fleet-sse": {
+      "type": "sse",
+      "url": "http://127.0.0.1:8090/mcp/fleet/sse"
+    },
+    "watcher-records-sse": {
+      "type": "sse",
+      "url": "http://127.0.0.1:8090/mcp/records/sse"
+    },
+    "watcher-market-sse": {
+      "type": "sse",
+      "url": "http://127.0.0.1:8090/mcp/market/sse"
+    }
+  }
+}
