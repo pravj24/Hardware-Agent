@@ -16,6 +16,7 @@
 | Tender scoring | Six-factor weighted qualification rubric (customer-overridable, must sum to 100); pre-qualification must be verified at source to rank; each unverified factor scores zero, not partial; Crustdata signals carried as corroboration only, never authoritative; exact Decimal arithmetic |
 | Tender comparison | Reviewed simulation inputs, qualification/screening/availability flags, quote reference and expiry, exact Decimal arithmetic, scope/quantity consistency, no implicit currency conversion |
 | Interfaces | Authenticated local API, operations dashboard, three read-only MCP stdio zones |
+| Dashboard assistant | Server-side LLM (Claude via the official SDK, lazily imported; `claude-opus-5-5`) that drafts maintenance messages, approval summaries and tender searches via a bounded, append-only tool-use loop. Tools are read/draft-only (case evidence, Crustdata discovery, recent tenders); it cannot approve, send or execute, and is instructed to use only tool-returned figures. Runs an offline stub without `ANTHROPIC_API_KEY`; each invocation is audited to the ledger |
 | Verification lab | Stateful in-process fixture server plus a separate actual DMTF integration pinned to a commit |
 | CI | Python 3.11/3.13 on Windows/Linux; separate upstream DMTF job |
 

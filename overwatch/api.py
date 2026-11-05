@@ -20,10 +20,11 @@ from .tender import compare_bids
 
 
 class APIServer:
-    def __init__(self, app, collector, *, identities, discovery=None, host="127.0.0.1", port=8080):
+    def __init__(self, app, collector, *, identities, discovery=None, assist=None, host="127.0.0.1", port=8080):
         if host not in {"127.0.0.1", "localhost"}:
             raise ValueError("development API must bind to loopback")
         self.app, self.collector, self.identities, self.discovery = app, collector, identities, discovery
+        self.assist = assist
         self.thread = None
         api = self
         static = Path(__file__).parent / "web"
@@ -115,7 +116,7 @@ class APIServer:
                     "/api/permit": {"operator", "procurement"}, "/api/execute": {"operator", "procurement"},
                     "/api/reconcile": {"operator", "procurement"}, "/api/controls": {"policy_admin"},
                     "/api/tender/compare": {"procurement"}, "/api/tender/discover": {"procurement"},
-                    "/api/tender/score": {"procurement"}}
+                    "/api/tender/score": {"procurement"}, "/api/assist": {"operator", "procurement"}}
                 if route not in permissions:
                     return self.send(404, {"error": "route not found"})
                 if identity["role"] not in permissions[route]:
@@ -193,6 +194,10 @@ class APIServer:
                 raise Rejected("qualification scoring in this release is simulation-only")
             result = rank_candidates(body["candidates"], weights=body.get("weights"))
             return self._record_tender("shortlist", "candidates_scored", result, identity)
+        if route == "/api/assist":
+            if not self.assist:
+                raise Rejected("assistant not configured")
+            return self.assist.run(prompt=body["prompt"], task=body.get("task"), identity=identity)
         raise Rejected("unknown action")
 
     def _record_tender(self, kind, event, result, identity):

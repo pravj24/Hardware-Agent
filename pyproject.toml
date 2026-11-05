@@ -9,6 +9,12 @@ description = "Evidence-first hardware operations and Redfish verification lab"
 requires-python = ">=3.11"
 dependencies = []
 
+# Core app, demo and default tests use only the standard library. The assist feature's
+# live LLM path is the one optional dependency; it is imported lazily and only needed
+# when ANTHROPIC_API_KEY is configured. Install with: pip install watchermcp[assist]
+[project.optional-dependencies]
+assist = ["anthropic>=0.40"]
+
 [project.scripts]
 watchermcp = "overwatch.__main__:main"
 

@@ -34,6 +34,18 @@ Try **Lost action response** to exercise `RECONCILING`, or **Stale telemetry** t
 
 Discovery runs against a keyless fixture of real captured third-party-maintainer records by default; set `WATCHER_CRUSTDATA_TOKEN` before `python -m overwatch demo` to query live Crustdata company search instead. If Crustdata is unavailable, discovery degrades to the approved vendor list only and says so.
 
+### AI assistant (dashboard, drafts only)
+
+The **Tenders** view includes a server-side LLM assistant that drafts maintenance messages, approval-request summaries and provider/tender searches. It is the dashboard-native LLM path, distinct from the MCP servers (which expose tools to Claude Code as an external client). It calls Claude through the official `anthropic` SDK with three **read/draft-only** tools (`discover_providers`, `get_case_evidence`, `get_recent_tenders`); it cannot approve, send or execute — those stay on the authenticated policy/broker path — and it is instructed to use only figures returned by the tools (receipts, case facts), never invented numbers.
+
+```powershell
+pip install anthropic            # optional; only needed for live drafting
+$env:ANTHROPIC_API_KEY = "sk-ant-..."
+python -m overwatch demo
+```
+
+Without a key (or the SDK), the assistant runs in an offline stub so the endpoint still responds; the live tool-calling loop needs the key. Model defaults to `claude-opus-5-5`. The SDK import is lazy, so the app, demo and default tests keep running with no dependency installed.
+
 ## Test-driven implementation
 
 ```powershell
@@ -117,6 +129,7 @@ overwatch/
   api.py           Authenticated loopback API and UI hosting
   mcp.py           Read-only stdio tools split by trust zone
   tender.py        Deterministic bid eligibility and comparison
+  assist.py        Dashboard LLM assistant (Claude via SDK); read/draft-only tools
   discovery.py     Crustdata provider discovery (live client + keyless fixture), compliance screen
   scoring.py       Weighted qualification rubric; unverified factors score zero
   web/             Operations desk
