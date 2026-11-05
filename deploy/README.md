@@ -76,7 +76,17 @@ docker build -f deploy/Dockerfile -t watchermcp-web .
 docker run --rm -p 8090:8090 watchermcp-web
 ```
 
-## 5. Run the Verification Tests
+## 5. OAuth 2.1 + onboarding (optional)
+
+Enable the OAuth authorization server so Claude Code can connect over OAuth (instead of a static `--token`) and a user can onboard **through the MCP interface**:
+
+```bash
+python deploy/mcp_web_server.py --port 8090 --oauth --dashboard-url http://127.0.0.1:8080
+```
+
+This serves OAuth discovery (`/.well-known/oauth-protected-resource`, `/.well-known/oauth-authorization-server`), dynamic client registration (`/register`), PKCE authorize/token (`/authorize`, `/token`), and issues audience-bound, short-lived bearer tokens; `/mcp/*` then requires a valid token and returns `401` with a `WWW-Authenticate` challenge otherwise. When OAuth is on, `tools/list` also advertises **`overwatch.whoami`**, which returns the caller's role, scopes and onboarding gate status plus a link to the dashboard. It is **demo-grade**: `/authorize` auto-approves `--demo-role` instead of a real login; production terminates TLS at the ingress and swaps that step for the customer's SSO/OIDC. This is the gateway the onboarding Phase 6 ("AI clients") gate certifies. Add in Claude Code with `claude mcp add --transport http overwatch-fleet http://127.0.0.1:8090/mcp/fleet`.
+
+## 6. Run the Verification Tests
 
 ```bash
 python -m unittest discover -s deploy -p "test_*.py" -v

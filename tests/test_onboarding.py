@@ -213,7 +213,10 @@ class OnboardingTests(unittest.TestCase):
     def test_enabled_ai_requires_both_pilot_owner_and_security_review(self):
         self.sample()
         ai = {"enabled": True, "clients": ["lab-client"], "pilot_users": 5, "audit_days": 7,
-              "security_review": True, "manifest_ref": "fixture://manifest/v1", "scopes": ["cases:read", "plans:propose"]}
+              "security_review": True, "manifest_ref": "fixture://manifest/v1", "scopes": ["cases:read", "plans:propose"],
+              "gateway_url": "http://127.0.0.1:8090",
+              "oauth": {"pkce": True, "audience": "http://127.0.0.1:8090",
+                        "metadata_url": "http://127.0.0.1:8090/.well-known/oauth-authorization-server"}}
         self.onboarding.configure(self.admin, "ai", ai)
         self.sign("identity", "iam_lead")
         self.sign("ai", "ai_owner")

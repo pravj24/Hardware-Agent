@@ -32,9 +32,35 @@ if str(REPO_ROOT) not in sys.path:
 
 from overwatch.mcp import MCPServer, TOOL_SETS  # noqa: E402
 from overwatch.store import Store, canonical, digest  # noqa: E402
+from overwatch.onboarding import GATES, CONNECTORS  # noqa: E402
+from deploy.oauth import OAuthProvider  # noqa: E402
 
 VALID_ZONES = tuple(TOOL_SETS.keys())
 MAX_BODY_BYTES = 1_000_000
+WHOAMI_TOOL = {
+    "name": "overwatch.whoami",
+    "description": "Your authenticated role, scopes and onboarding gate status; links to the dashboard to complete onboarding. Read-only.",
+    "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
+    "annotations": {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False},
+}
+
+
+def onboarding_whoami(store: Store, claims: dict, dashboard_url: str) -> dict:
+    """Identity + per-role onboarding gate status, read from the store. No writes."""
+    role = (claims or {}).get("role")
+    state = store.read("onboarding", "setup")
+    owned = []
+    for gate, (title, owners, _days, _criterion) in GATES.items():
+        gate_owners = list(CONNECTORS.values()) if gate == "connectors" else owners
+        if role in gate_owners:
+            signed = bool(state) and any(s.get("role") == role for s in state.get("signatures", {}).get(gate, []))
+            owned.append({"gate": gate, "title": title, "signed_by_your_role": signed})
+    return {
+        "identity": {"role": role, "scope": (claims or {}).get("scope"), "subject": (claims or {}).get("sub")},
+        "onboarding": {"started": bool(state), "stage": state.get("stage") if state else None,
+                       "your_gates": owned, "dashboard_url": dashboard_url},
+        "notice": "Read-only MCP identity. Sign gates and complete onboarding in the operations dashboard; the MCP interface cannot approve, sign or execute.",
+    }
 
 
 def seed_demo_records(store: Store, now: float | None = None) -> dict[str, int]:
@@ -210,12 +236,16 @@ class MCPWebServer:
         zones: tuple[str, ...] = VALID_ZONES,
         token: str | None = None,
         stateless_fallback: bool = True,
+        oauth: OAuthProvider | None = None,
+        dashboard_url: str = "http://127.0.0.1:8080",
     ):
         self.store = store
         self.host = host
         self.port = port
         self.zones = tuple(zones)
         self.token = token
+        self.oauth = oauth
+        self.dashboard_url = dashboard_url
         self.registry = ZoneSessionRegistry(store, active_zones=self.zones, stateless_fallback=stateless_fallback)
         self._httpd: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
@@ -254,16 +284,26 @@ class MCPWebServer:
                 self.wfile.write(body)
 
             def _check_auth(self) -> bool:
-                if not parent.token:
-                    return True
                 auth = self.headers.get("Authorization", "")
-                if auth == f"Bearer {parent.token}":
+                self.claims = None
+                if parent.token and auth == f"Bearer {parent.token}":
+                    self.claims = {"role": "static-token", "scope": "mcp:read"}
                     return True
-                self._send_json(HTTPStatus.UNAUTHORIZED, {
-                    "error": "Unauthorized",
-                    "message": "Valid Bearer token required",
-                })
-                return False
+                if parent.oauth is not None:
+                    try:
+                        self.claims = parent.oauth.validate(auth)
+                        return True
+                    except Exception as exc:
+                        resource = parent.oauth.public_url + "/.well-known/oauth-protected-resource"
+                        self._send_json(HTTPStatus.UNAUTHORIZED,
+                                        {"error": "unauthorized", "message": str(exc)},
+                                        extra_headers={"WWW-Authenticate": f'Bearer resource_metadata="{resource}"'})
+                        return False
+                if parent.token:
+                    self._send_json(HTTPStatus.UNAUTHORIZED,
+                                    {"error": "Unauthorized", "message": "Valid Bearer token required"})
+                    return False
+                return True
 
             def _resolve_zone_and_route(self, path: str) -> tuple[str | None, str]:
                 parts = [p for p in path.strip("/").split("/") if p]
@@ -306,6 +346,26 @@ class MCPWebServer:
                         "ledger_valid": ledger_ok,
                     })
                     return
+
+                if parent.oauth is not None:
+                    if parsed.path.startswith("/.well-known/oauth-protected-resource"):
+                        self._send_json(HTTPStatus.OK, parent.oauth.protected_resource())
+                        return
+                    if parsed.path == "/.well-known/oauth-authorization-server":
+                        self._send_json(HTTPStatus.OK, parent.oauth.metadata())
+                        return
+                    if parsed.path == "/authorize":
+                        try:
+                            location = parent.oauth.authorize({k: v[0] for k, v in parse_qs(parsed.query).items()})
+                        except Exception as exc:
+                            self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+                            return
+                        self.send_response(HTTPStatus.FOUND)
+                        self.send_header("Location", location)
+                        self.send_header("Content-Length", "0")
+                        self._send_cors_headers()
+                        self.end_headers()
+                        return
 
                 if not self._check_auth():
                     return
@@ -381,11 +441,29 @@ class MCPWebServer:
 
                 self._send_json(HTTPStatus.NOT_FOUND, {"error": "Not found"})
 
+            def _handle_oauth_post(self, path):
+                try:
+                    length = int(self.headers.get("Content-Length", "0"))
+                except ValueError:
+                    length = 0
+                raw = self.rfile.read(length) if 0 < length <= MAX_BODY_BYTES else b""
+                if path == "/register":
+                    self._send_json(HTTPStatus.CREATED, parent.oauth.register())
+                    return
+                form = {k: v[0] for k, v in parse_qs(raw.decode("utf-8", "replace")).items()}
+                try:
+                    self._send_json(HTTPStatus.OK, parent.oauth.token(form))
+                except Exception as exc:
+                    self._send_json(HTTPStatus.BAD_REQUEST, {"error": "invalid_grant", "error_description": str(exc)})
+
             def do_POST(self):
+                parsed = urlparse(self.path)
+                if parent.oauth is not None and parsed.path in ("/register", "/token"):
+                    self._handle_oauth_post(parsed.path)
+                    return
                 if not self._check_auth():
                     return
 
-                parsed = urlparse(self.path)
                 zone, route = self._resolve_zone_and_route(parsed.path)
                 if route not in {"rpc", "messages"} or zone not in parent.zones:
                     self._send_json(HTTPStatus.NOT_FOUND, {"error": "Unknown MCP zone endpoint"})
@@ -420,7 +498,21 @@ class MCPWebServer:
                     or (query.get("session_id", [None])[0])
                 )
 
+                method = payload.get("method") if isinstance(payload, dict) else None
+                params = payload.get("params") if isinstance(payload, dict) else None
+                if parent.oauth is not None and method == "tools/call" and isinstance(params, dict) \
+                        and params.get("name") == "overwatch.whoami":
+                    result = onboarding_whoami(parent.store, getattr(self, "claims", None), parent.dashboard_url)
+                    extra = {"Mcp-Session-Id": session_id} if session_id else {}
+                    self._send_json(HTTPStatus.OK, {"jsonrpc": "2.0", "id": payload.get("id"),
+                        "result": {"content": [{"type": "text", "text": canonical(result)}], "isError": False}},
+                        extra_headers=extra)
+                    return
+
                 response, active_sid = parent.registry.dispatch(zone, payload, session_id=session_id)
+                if parent.oauth is not None and method == "tools/list" and isinstance(response, dict) \
+                        and isinstance(response.get("result"), dict) and isinstance(response["result"].get("tools"), list):
+                    response["result"]["tools"].append(WHOAMI_TOOL)
                 headers = {"Mcp-Session-Id": active_sid}
                 if response is None:
                     self.send_response(HTTPStatus.ACCEPTED)
@@ -509,10 +601,28 @@ def main(argv: list[str] | None = None) -> int:
         default=os.environ.get("WATCHER_MCP_STRICT_SESSION", "0").lower() in {"1", "true", "yes"},
         help="Require explicit MCP initialize handshake before tools/list or tools/call",
     )
+    parser.add_argument(
+        "--oauth",
+        action="store_true",
+        default=os.environ.get("WATCHER_MCP_OAUTH", "0").lower() in {"1", "true", "yes"},
+        help="Enable the OAuth 2.1 authorization server (discovery, PKCE, audience-bound tokens) + the overwatch.whoami onboarding tool",
+    )
+    parser.add_argument("--public-url", default=os.environ.get("WATCHER_MCP_PUBLIC_URL"),
+                        help="Externally reachable base URL for OAuth metadata/redirects (default http://127.0.0.1:<port>)")
+    parser.add_argument("--dashboard-url", default=os.environ.get("WATCHER_MCP_DASHBOARD_URL", "http://127.0.0.1:8080"),
+                        help="Operations dashboard URL surfaced by the onboarding whoami tool")
+    parser.add_argument("--demo-role", default=os.environ.get("WATCHER_MCP_DEMO_ROLE", "operator"),
+                        help="Role auto-approved by the demo OAuth /authorize step (replace with real SSO in production)")
     args = parser.parse_args(argv)
 
     zones = parse_zones(args.zone)
     store = Store(args.db)
+    oauth = None
+    if args.oauth:
+        signing = os.environ.get("WATCHER_MCP_SIGNING_KEY")
+        key = bytes.fromhex(signing) if signing else secrets.token_bytes(32)
+        public_url = args.public_url or f"http://127.0.0.1:{args.port}"
+        oauth = OAuthProvider(key, public_url, demo_role=args.demo_role)
     if args.seed_demo:
         counts = seed_demo_records(store)
     else:
@@ -525,12 +635,17 @@ def main(argv: list[str] | None = None) -> int:
         zones=zones,
         token=args.token,
         stateless_fallback=not args.strict_session,
+        oauth=oauth,
+        dashboard_url=args.dashboard_url,
     ).start()
 
     print(f"WatcherMCP Web Service running at {server.url}", flush=True)
     print(f"Database: {Path(args.db).resolve()} (records: {json.dumps(counts)})", flush=True)
     for z in zones:
         print(f"  [{z}] Streamable HTTP: {server.url}/mcp/{z} | SSE: {server.url}/mcp/{z}/sse", flush=True)
+    if oauth is not None:
+        print(f"  OAuth 2.1 enabled (demo auto-approves role '{args.demo_role}'); discovery at "
+              f"{oauth.public_url}/.well-known/oauth-authorization-server; onboarding tool: overwatch.whoami", flush=True)
 
     try:
         while True:

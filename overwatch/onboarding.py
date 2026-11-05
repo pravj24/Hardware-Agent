@@ -43,7 +43,7 @@ PRODUCTION_BLOCKERS = [
     "Only the local Redfish fixture is probed; seven days of real fleet coverage are not established.",
     "DCIM/CMDB, CMMS, change calendar and messaging adapters are not certified.",
     "Independent policy service, live historical replay and enterprise approval authority are not integrated.",
-    "External OAuth MCP gateway, client pilot and gateway audit review are not implemented.",
+    "The OAuth MCP gateway is implemented (deploy/mcp_web_server.py: discovery, PKCE, audience-bound tokens, read-only tools, overwatch.whoami); a real SSO-backed client pilot and gateway audit review across 5–10 users remain outstanding.",
     "Eight to twelve weeks of real shadow outcomes and promotion evidence remain outstanding.",
 ]
 
@@ -82,7 +82,8 @@ def sample_config():
                    "price_tolerance_percent": 2, "people_search": False, "replay_days": 30,
                    "replay_evidence": "fixture://policy-replay/30-days", "step_up_test": True},
         "ai": {"enabled": False, "clients": [], "pilot_users": 0, "audit_days": 0,
-               "security_review": False, "manifest_ref": "", "scopes": ["cases:read"]},
+               "security_review": False, "manifest_ref": "", "scopes": ["cases:read"],
+               "gateway_url": "", "oauth": {"pkce": True, "audience": "", "metadata_url": ""}},
     }
 
 
@@ -290,9 +291,16 @@ class Onboarding:
                 elif gate == "ai":
                     ai = config.get("ai", {})
                     if ai.get("enabled") is not False:
+                        manifest = ai.get("manifest_ref", "")
+                        oauth = ai.get("oauth", {}) if isinstance(ai.get("oauth"), dict) else {}
+                        gateway = ai.get("gateway_url", "")
                         check(gate, ai.get("enabled") is True and ai.get("clients") and 5 <= ai.get("pilot_users", 0) <= 10
-                              and ai.get("audit_days", 0) >= 7 and ai.get("security_review") is True and ai.get("manifest_ref", "").startswith("fixture://"),
-                              "Record client registration, 5–10 pilot users, a week of audit review and a pinned manifest fixture.")
+                              and ai.get("audit_days", 0) >= 7 and ai.get("security_review") is True
+                              and (manifest.startswith("fixture://") or manifest.startswith("https://")),
+                              "Record client registration, 5–10 pilot users, a week of audit review and a pinned manifest.")
+                        check(gate, (gateway.startswith("https://") or gateway.startswith("http://127.0.0.1"))
+                              and oauth.get("pkce") is True and bool(oauth.get("audience")) and bool(oauth.get("metadata_url")),
+                              "Point the AI clients at the OAuth MCP gateway: https/loopback URL, PKCE, a bound token audience and a discovery metadata URL.")
                         check(gate, bool(ai.get("scopes")) and set(ai.get("scopes", [])) <= ALLOWED_SCOPES,
                               "Only read/propose scopes are allowed; no approval, execution or policy scope.")
             except (KeyError, TypeError, ValueError, AttributeError, ZoneInfoNotFoundError, Rejected):

@@ -137,7 +137,10 @@ class Hackathon:
                 config["telemetry"]["coverage"] = [{"serial": d["serial"], "continuous_days": 7} for d in config["inventory"]["devices"]]
                 config["ai"] = {"enabled": True, "clients": ["Demo enterprise assistant", "Demo in-house agent"],
                                 "pilot_users": 8, "audit_days": 7, "security_review": True,
-                                "manifest_ref": "fixture://gateway/manifest-v1", "scopes": ["cases:read", "assets:read", "plans:propose", "requests:create"]}
+                                "manifest_ref": "fixture://gateway/manifest-v1", "scopes": ["cases:read", "assets:read", "plans:propose", "requests:create"],
+                                "gateway_url": "http://127.0.0.1:8090",
+                                "oauth": {"pkce": True, "audience": "overwatch-demo",
+                                          "metadata_url": "http://127.0.0.1:8090/.well-known/oauth-authorization-server"}}
                 for category in ["procurement", "entitlement"]:
                     config["connectors"].append({"category": category, "name": PROVIDERS[category], "owner_role": "infrastructure_lead",
                            "mode": "read-only", "credential_ref": "vault://overwatch/lab/" + category,
