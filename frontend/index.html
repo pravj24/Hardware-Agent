@@ -170,6 +170,10 @@
         <span class="text-sm">⛓️</span>
         <span>Ledger</span>
       </button>
+      <button type="button" data-nav="onboarding" class="nav-rail-btn w-11 h-11 rounded-lg flex flex-col items-center justify-center text-slate-400 hover:text-white hover:bg-slate-800/60 text-[10px] gap-0.5" title="Enterprise Onboarding (live)">
+        <span class="text-sm">🚀</span>
+        <span>Onboard</span>
+      </button>
       <div class="mt-auto flex flex-col items-center gap-2">
         <button type="button" id="rail-btn-briefing" class="w-11 h-11 rounded-lg flex flex-col items-center justify-center text-indigo-400 hover:bg-indigo-500/15 text-[10px] gap-0.5" title="Morning Shift Handover">
           <span class="text-sm">📋</span>
@@ -389,6 +393,9 @@
             </button>
             <button type="button" data-tab="audit" class="drill-tab-btn px-3 py-1.5 rounded font-medium text-slate-400 hover:text-white hover:bg-slate-800/60">
               Hash-Chained Audit Ledger
+            </button>
+            <button type="button" data-tab="onboarding" class="drill-tab-btn px-3 py-1.5 rounded font-medium text-slate-400 hover:text-white hover:bg-slate-800/60">
+              Enterprise Onboarding · live
             </button>
           </div>
 
@@ -706,6 +713,42 @@
               <span id="ledger-count-badge" class="text-[11px] font-mono-num text-emerald-400">Chain Integrity: VALID</span>
             </div>
             <div id="audit-ledger-list" class="space-y-1.5 max-h-64 overflow-y-auto font-mono-num text-[11px]"></div>
+          </div>
+        </div>
+
+        <div id="tab-panel-onboarding" class="hidden space-y-3">
+          <div id="ob-banner" class="noc-card p-2.5 text-[11px] text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded hidden"></div>
+
+          <div class="noc-card p-3">
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-xs font-bold uppercase tracking-wider text-sky-300">Live backend connection</span>
+              <span id="ob-conn-status" class="text-[11px] font-mono-num text-slate-400">Not connected</span>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-12 gap-2 items-end">
+              <label class="md:col-span-5 text-[11px] text-slate-400">API base URL
+                <input id="ob-api-url" type="text" spellcheck="false" placeholder="http://127.0.0.1:8080"
+                  class="mt-1 w-full bg-slate-900/70 border border-slate-700 rounded px-2 py-1.5 text-xs text-white font-mono-num"></label>
+              <label class="md:col-span-5 text-[11px] text-slate-400">Role token (from data/demo-credentials.json)
+                <input id="ob-token" type="password" autocomplete="off" placeholder="paste role token"
+                  class="mt-1 w-full bg-slate-900/70 border border-slate-700 rounded px-2 py-1.5 text-xs text-white font-mono-num"></label>
+              <button id="ob-connect" type="button"
+                class="md:col-span-2 bg-sky-500/20 text-sky-300 border border-sky-500/40 rounded px-3 py-1.5 text-xs font-semibold hover:bg-sky-500/30">Connect</button>
+            </div>
+            <p class="mt-2 text-[10px] text-slate-500">No backend running? This view falls back to an in-browser onboarding simulation. Start the backend with <span class="font-mono-num text-slate-400">python -m overwatch demo</span> and connect for the live rehearsal.</p>
+          </div>
+
+          <div class="noc-card p-3">
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-xs font-bold uppercase tracking-wider text-emerald-300">Enterprise onboarding · T0 shadow</span>
+              <span id="ob-summary" class="text-[11px] font-mono-num text-slate-400">—</span>
+            </div>
+            <div id="ob-admin-actions" class="flex flex-wrap gap-2 mb-2"></div>
+            <div id="ob-gates" class="grid grid-cols-1 lg:grid-cols-2 gap-2"></div>
+          </div>
+
+          <div class="noc-card p-3">
+            <span class="text-xs font-bold uppercase tracking-wider text-red-300">Production blockers (remain outstanding)</span>
+            <ul id="ob-blockers" class="mt-2 space-y-1 text-[11px] text-slate-400 list-disc list-inside"></ul>
           </div>
         </div>
 
@@ -1696,9 +1739,128 @@
         }
       }
 
+      // ---------------------------------------------------------------------
+      // 6b. LIVE ENTERPRISE ONBOARDING (calls the Overwatch backend API)
+      // ---------------------------------------------------------------------
+      let obRole = null;
+      const obEl = id => document.getElementById(id);
+      const obEsc = v => String(v == null ? "" : v).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+      function obCfg() {
+        return {
+          base: (localStorage.getItem("ob_api") || "http://127.0.0.1:8080").trim().replace(/\/+$/, ""),
+          token: localStorage.getItem("ob_token") || ""
+        };
+      }
+      async function obApi(path, method, body) {
+        const { base, token } = obCfg();
+        const init = { method: method || "GET", headers: { "Authorization": "Bearer " + token } };
+        if (body !== undefined) { init.headers["Content-Type"] = "application/json"; init.body = JSON.stringify(body); }
+        const res = await fetch(base + path, init);
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || ("HTTP " + res.status));
+        return data;
+      }
+      const OB_SIM = {
+        started: true, revision: 3, stage: "SETUP", shadow_status: "NOT_STARTED",
+        ready_for_simulated_shadow: false,
+        gates: [
+          { id: "identity", title: "1 · Tenant and identity", status: "passed", criterion: "Tenant settings, role mappings, SSO/SCIM/step-up.", blockers: [], missing_signers: [], signatures: [] },
+          { id: "inventory", title: "2 · Sites and hardware", status: "at_risk", criterion: "≥95% matched declared assets; zero untriaged discoveries.", blockers: [], missing_signers: ["infrastructure_lead"], signatures: [] },
+          { id: "telemetry", title: "3 · Collectors and credentials", status: "blocked", criterion: "≥90% coverage for 7 days; read-only probe.", blockers: ["Run a fresh Redfish read-only probe."], missing_signers: ["operator", "security_lead"], signatures: [] },
+          { id: "connectors", title: "4 · Systems of record", status: "blocked", criterion: "Seven read-only connectors certified by owners.", blockers: ["Certify the seven connectors."], missing_signers: ["iam_lead"], signatures: [] },
+          { id: "policy", title: "5 · Policy release", status: "blocked", criterion: "Two reviewers, 30-day replay, all actions T0.", blockers: ["Two independent reviewers required."], missing_signers: ["risk_lead", "security_lead"], signatures: [] },
+          { id: "ai", title: "6 · Enterprise AI clients (optional)", status: "not_required", criterion: "OAuth MCP gateway + read/propose scopes.", blockers: [], missing_signers: [], signatures: [] }
+        ],
+        production_blockers: [
+          "SSO/OIDC/SAML, SCIM and fresh MFA are not connected; local tokens are rehearsal identities.",
+          "This is the in-browser simulation — connect a live backend for the real rehearsal."
+        ]
+      };
+      function renderOnboarding(snap) {
+        obEl("ob-summary").textContent = snap.started
+          ? "rev " + snap.revision + " · " + snap.stage + " · " + (snap.shadow_status || "") + " · " +
+            (snap.gates || []).filter(g => g.status === "passed").length + "/" + (snap.gates || []).length + " gates signed"
+          : "Not started";
+        const admin = [];
+        const btn = (k, label, cls) => '<button data-ob="' + k + '" class="' + cls + ' rounded px-2.5 py-1 text-[11px] font-semibold">' + label + "</button>";
+        if (obRole === "policy_admin") {
+          admin.push(snap.started
+            ? btn("sample", "Load simulation config", "bg-sky-500/20 text-sky-300 border border-sky-500/40 hover:bg-sky-500/30")
+            : btn("start", "Start onboarding at T0", "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 hover:bg-emerald-500/30"));
+        }
+        if (["operator", "security_lead"].includes(obRole) && snap.started)
+          admin.push(btn("probe", "Probe lab device", "bg-sky-500/20 text-sky-300 border border-sky-500/40 hover:bg-sky-500/30"));
+        if (obRole === "risk_lead" && snap.ready_for_simulated_shadow)
+          admin.push(btn("shadow", "Start shadow mode", "bg-purple-500/20 text-purple-300 border border-purple-500/40 hover:bg-purple-500/30"));
+        obEl("ob-admin-actions").innerHTML = admin.join("") ||
+          '<span class="text-[11px] text-slate-500">' + (obRole ? "No onboarding actions for role " + obEsc(obRole) + " at this stage." : "Connect with a role token to act.") + "</span>";
+        const toneOf = s => ({ passed: "emerald", blocked: "red", not_required: "slate", at_risk: "amber" }[s] || "amber");
+        obEl("ob-gates").innerHTML = (snap.gates || []).map(g => {
+          const tone = toneOf(g.status), canSign = (g.missing_signers || []).includes(obRole);
+          return '<div class="rounded border border-slate-700 bg-slate-900/50 p-2.5">' +
+            '<div class="flex items-center justify-between"><span class="text-xs font-semibold text-white">' + obEsc(g.title) + "</span>" +
+            '<span class="text-[10px] font-mono-num uppercase text-' + tone + '-400">' + obEsc(String(g.status).replace(/_/g, " ")) + "</span></div>" +
+            '<p class="mt-1 text-[11px] text-slate-400">' + obEsc(g.criterion) + "</p>" +
+            ((g.blockers || []).length ? '<ul class="mt-1 text-[10px] text-amber-300/80 list-disc list-inside">' + g.blockers.map(b => "<li>" + obEsc(b) + "</li>").join("") + "</ul>" : "") +
+            ((g.missing_signers || []).length ? '<p class="mt-1 text-[10px] text-slate-500">Awaiting: ' + g.missing_signers.map(obEsc).join(", ") + "</p>" : "") +
+            (canSign ? '<button data-ob-sign="' + obEsc(g.id) + '" data-ob-rev="' + obEsc(snap.revision) + '" class="mt-2 bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 rounded px-2.5 py-1 text-[11px] font-semibold hover:bg-emerald-500/30">Sign ' + obEsc(g.id) + " gate</button>" : "") +
+            "</div>";
+        }).join("");
+        obEl("ob-blockers").innerHTML = (snap.production_blockers || []).map(b => "<li>" + obEsc(b) + "</li>").join("");
+      }
+      function obOffline(msg) {
+        const banner = obEl("ob-banner");
+        banner.textContent = msg; banner.classList.remove("hidden");
+        obEl("ob-conn-status").textContent = "Offline · simulation";
+        obEl("ob-conn-status").className = "text-[11px] font-mono-num text-amber-400";
+        obRole = null;
+        renderOnboarding(OB_SIM);
+      }
+      async function refreshOnboarding() {
+        const { base, token } = obCfg();
+        if (!obEl("ob-api-url").value) obEl("ob-api-url").value = base;
+        if (!token) return obOffline("Enter the API base URL and a role token, then Connect for the live rehearsal.");
+        try {
+          const st = await obApi("/api/state");
+          obRole = st.identity ? st.identity.role : null;
+          const snap = await obApi("/api/onboarding");
+          obEl("ob-banner").classList.add("hidden");
+          obEl("ob-conn-status").textContent = "Connected · " + (obRole || "unknown");
+          obEl("ob-conn-status").className = "text-[11px] font-mono-num text-emerald-400";
+          renderOnboarding(snap);
+        } catch (err) {
+          obOffline("Live backend unreachable (" + err.message + "). Showing in-browser simulation.");
+        }
+      }
+      async function obAction(kind, extra) {
+        const routes = { start: "/api/onboarding/start", sample: "/api/onboarding/sample", probe: "/api/onboarding/probe", shadow: "/api/onboarding/shadow" };
+        try {
+          if (kind === "sign") await obApi("/api/onboarding/sign", "POST", { gate: extra.gate, revision: Number(extra.rev) });
+          else await obApi(routes[kind], "POST", {});
+          showToast("Onboarding", kind + " recorded", "ok");
+          refreshOnboarding();
+        } catch (err) { showToast("Onboarding failed", err.message, "crit"); }
+      }
+      function wireOnboarding() {
+        obEl("ob-api-url").value = obCfg().base;
+        obEl("ob-connect").addEventListener("click", () => {
+          localStorage.setItem("ob_api", (obEl("ob-api-url").value || "http://127.0.0.1:8080").trim());
+          const t = obEl("ob-token").value.trim();
+          if (t) localStorage.setItem("ob_token", t);
+          obEl("ob-token").value = "";
+          refreshOnboarding();
+        });
+        obEl("tab-panel-onboarding").addEventListener("click", e => {
+          const sign = e.target.closest("[data-ob-sign]");
+          if (sign) return obAction("sign", { gate: sign.getAttribute("data-ob-sign"), rev: sign.getAttribute("data-ob-rev") });
+          const act = e.target.closest("[data-ob]");
+          if (act) return obAction(act.getAttribute("data-ob"));
+        });
+      }
+
       function switchTab(tabId) {
         state.activeTab = tabId;
-        ["overview", "lifecycle", "tender", "mcp", "audit"].forEach(t => {
+        ["overview", "lifecycle", "tender", "mcp", "audit", "onboarding"].forEach(t => {
           const panel = document.getElementById("tab-panel-" + t);
           if (panel) {
             if (t === tabId) panel.classList.remove("hidden");
@@ -1714,6 +1876,9 @@
         });
         if (tabId === "overview") {
           setTimeout(renderAllCharts, 30);
+        }
+        if (tabId === "onboarding") {
+          refreshOnboarding();
         }
       }
 
@@ -1885,6 +2050,7 @@
             else if (target === "tender") switchTab("tender");
             else if (target === "mcp") switchTab("mcp");
             else if (target === "audit") switchTab("audit");
+            else if (target === "onboarding") switchTab("onboarding");
             return;
           }
 
@@ -1914,6 +2080,7 @@
         });
         invokeMcpTool("fleet.get_observations");
         initEvents();
+        wireOnboarding();
         updateClock();
         setInterval(updateClock, 2000);
         setTimeout(renderAllCharts, 60);
