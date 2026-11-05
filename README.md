@@ -1,0 +1,138 @@
+# WatcherMCP
+
+Evidence-first hardware operations, built around a tested permission boundary:
+
+**Observe → gather receipts → plan → verify → approve → permit → execute → verify recovery.**
+
+This repository is a runnable reference implementation of the Hardware Overwatch architecture. It includes a local Redfish lab, an authenticated operations desk, durable workflow state, and read-only MCP servers. It deliberately does **not** enable real BMC writes, send RFQs, issue purchase orders, or claim validated failure prediction.
+
+## Run the operations desk
+
+Requires Python 3.11 or newer. The application and default tests use only the Python standard library; no API key or package installation is needed.
+
+```powershell
+cd WatcherMCP
+python -m overwatch demo
+```
+
+Open **http://127.0.0.1:8080**. Copy the `operator` token from the generated `data/demo-credentials.json` into the login form. Tokens and the signing key are local files excluded from Git. Stop the services with Ctrl+C.
+
+The default ports are 8080 (desk) and 8001 (lab). Override them with `--port` and `--lab-port`. Use `--data another-local-directory` for a clean simulation environment.
+
+### Walk through a case
+
+1. Choose **Thermal degradation**, click **Set scenario**, then **Collect telemetry**.
+2. Select the case and **Prepare repair plan**.
+3. **Verify evidence**, then **Approve this plan**.
+4. **Request permit**, then **Execute permitted action**.
+5. The case stays in `POST_CHECK`: an HTTP success response has not fixed the sensor.
+6. Choose **Recovered**, set the scenario, and collect at least three fresh observations spanning 60 seconds. Only then does the case close.
+
+For a quick UI demonstration, start with `python -m overwatch demo --soak-seconds 0`; three distinct post-action samples are still required. The shortened soak is a test setting, not a production recommendation.
+
+Try **Lost action response** to exercise `RECONCILING`, or **Stale telemetry** to see verification refuse the plan. Switch to the `policy_admin` token to halt execution. Use the `procurement` token in Tenders to compare the provided sample bids. The role comes from the token configuration, never from a request body.
+
+## Test-driven implementation
+
+```powershell
+python -m unittest discover -s tests -v
+python -m compileall -q overwatch
+node --check overwatch/web/app.js
+```
+
+Node is needed only for the optional JavaScript syntax check. Three DMTF integration tests are skipped unless their environment variables are set. The main tests run real local HTTP servers and require permission to use loopback sockets.
+
+The suite covers:
+
+- Healthy and degraded observations, duplicate events and persistent case state.
+- Receipt hashes, measurement freshness, unverified timestamps and simulation isolation.
+- Wrong roles, missing approvals, two-person approval, plan changes, permit expiration and kill switches.
+- Atomic single-use permits, budget reservation, ambiguous outcomes and restart reconciliation.
+- False action success, pre-action observations, interrupted soak periods and verified recovery.
+- Exact decimal bid totals, qualification gates, quote expiry, currencies and equivalent quantity/scope.
+- API authentication, origin/host checks, role spoofing and end-to-end HTTP operation.
+- MCP lifecycle, zone-specific read-only tools and architectural dependency boundaries.
+
+See [verification protocol](docs/verification.md) for the release gates and [TDD record](docs/tdd-record.md) for the red/green development sequence.
+
+An optional real-browser smoke runner is provided in `scripts/ui-smoke.cjs`. Install Playwright and its browser in your development environment, then run `node scripts/ui-smoke.cjs`. `PLAYWRIGHT_MODULE` can point to an existing package and `PLAYWRIGHT_CHANNEL=msedge` selects an installed Edge browser. The runner launches/stops its own local app, checks the full workflow and tender UI, and saves screenshots and a report under ignored `artifacts/`.
+
+## Actual DMTF Mockup Server
+
+The bundled stateful lab is our own small scenario server. The upstream DMTF server is a separate, pinned integration. Its source is **not copied into this repository**.
+
+With Docker installed:
+
+```powershell
+docker compose up --build -d redfish-mock
+python -m overwatch collect --url http://127.0.0.1:8000 --data data/dmtf
+docker compose down
+```
+
+The Docker recipe pins upstream source and Python package versions; the Python base-image tag is not digest-pinned. Resolve a platform-specific base digest as part of production supply-chain hardening. Docker itself was not available on the development machine; the same upstream revision was checked natively.
+
+The DMTF sample has no usable measurement timestamp in the collected thermal snapshot. Such receipts are labeled `retrieval_only` and cannot authorize an action. This is expected evidence behavior, not a reason to bypass freshness checks.
+
+To run the upstream integration tests natively, clone the repository **outside** this project, check out the revision from `integrations/dmtf/manifest.json`, and install `integrations/dmtf/requirements.lock` into a dedicated virtual environment:
+
+```powershell
+$env:WATCHER_DMTF_REPO = 'C:\path\to\Redfish-Mockup-Server'
+$env:WATCHER_DMTF_PYTHON = 'C:\path\to\dmtf-venv\Scripts\python.exe'
+python -m unittest tests.test_dmtf -v
+```
+
+The tests start and stop the upstream server, check its revision and collector compatibility, and demonstrate that an accepted reset does not establish a changed power state. See [DMTF integration](docs/redfish-lab.md).
+
+## MCP tools
+
+Start the demo or collect once to create the database, then configure your MCP client to run separate stdio processes:
+
+```text
+python -m overwatch mcp --zone fleet --db /absolute/path/to/data/overwatch.db
+python -m overwatch mcp --zone records --db /absolute/path/to/data/overwatch.db
+python -m overwatch mcp --zone market --db /absolute/path/to/data/overwatch.db
+```
+
+Set the client's working directory to this checkout, or install this project into its Python environment with `python -m pip install -e .`. An example configuration is in [examples/mcp-config.json](examples/mcp-config.json).
+
+| Zone | Tools |
+|---|---|
+| Fleet | `fleet.get_observations` |
+| Records | `records.get_cases`, `records.get_plans` |
+| Market | `market.get_tenders` (simulation comparisons only) |
+
+These are a minimal MCP 2025-06-18 stdio implementation. Tools return at most the latest 100 matching records. There are no model-accessible approval, signing, policy-update or execution tools. The broker is invoked by the authenticated workflow/API path. No LLM provider is called or billed; a connected model may use the read tools for analysis, while plans in this release use deterministic templates.
+
+## Repository layout
+
+```text
+overwatch/
+  service.py       Cases, verifier, approvals, permit lifecycle, broker orchestration
+  policy.py        Decimal amounts, role policy, canonical plan hashes, permit signing
+  store.py         SQLite transactions and hash-chained events
+  redfish.py       Link-following collector and simulation-only action adapter
+  simulator.py     Stateful local Redfish scenarios and action outcomes
+  api.py           Authenticated loopback API and UI hosting
+  mcp.py           Read-only stdio tools split by trust zone
+  tender.py        Deterministic bid eligibility and comparison
+  web/             Operations desk
+tests/             Behavioral, HTTP, MCP, architecture and upstream tests
+integrations/dmtf/ Pinned upstream manifest, dependency lock and Docker recipe
+docs/              Architecture, verification, limitations and decisions
+examples/          MCP and tender inputs
+.github/workflows/ Windows/Linux tests and upstream integration CI
+```
+
+## Production boundary
+
+This is a working foundation, **not a production-certified fleet controller**. The local HTTP server is for loopback development. Policy and broker classes currently share a process, and HMAC signing is local. SQLite's ledger is tamper-evident but not WORM or independently anchored.
+
+Before enabling production actions: separate the policy/signing service and broker identities, introduce SSO and customer vaults, use a production database and immutable evidence store, implement audited OEM-specific adapters and durable job infrastructure, validate prediction models on real labels, and pass physical-hardware recovery tests. Live Crustdata, CMMS, ERP, provider qualification and RFQ delivery require credentials, reviewed schemas and partner integration work. See the [implementation status](docs/implementation-status.md).
+
+Production read collection requires HTTPS with certificate verification:
+
+```powershell
+python -m overwatch collect --url https://your-authorized-bmc --environment production --data data/production-readonly
+```
+
+An optional `WATCHER_REDFISH_AUTHORIZATION` environment variable supplies an authorization header, and `--ca-file` accepts a customer CA. The collector does not log the header. Production and simulation databases are deliberately incompatible. This release rejects execution plans in production mode.

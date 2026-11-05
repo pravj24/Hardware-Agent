@@ -1,0 +1,78 @@
+"use strict";
+let token = sessionStorage.getItem("watcher-token") || "";
+let state = null, selected = null, activeView = "cases", busy = false;
+const $ = id => document.getElementById(id);
+const esc = value => String(value ?? "").replace(/[&<>"']/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
+const short = value => String(value || "").slice(-8);
+const date = seconds => new Date(seconds * 1000).toLocaleString();
+function message(text, error=false) { $("message").textContent=text; $("message").className=error?"error":""; $("message").hidden=false; clearTimeout(message.timer); message.timer=setTimeout(()=>$("message").hidden=true,8000); }
+async function api(path, body) {
+  const response = await fetch(path,{method:body===undefined?"GET":"POST",headers:{Authorization:`Bearer ${token}`,"Content-Type":"application/json"},...(body===undefined?{}:{body:JSON.stringify(body)})});
+  const result = await response.json();
+  if(!response.ok) throw new Error(result.error || `Request failed (${response.status})`);
+  return result;
+}
+async function act(path, body, success) {
+  if(busy) return;
+  busy=true;
+  try { const result=await api(path,body); message(success || "Saved."); await refresh(); return result; }
+  catch(error) { message(error.message,true); }
+  finally { busy=false; }
+}
+async function refresh() {
+  if(!token) return;
+  try {
+    state=await api("/api/state"); $("login").hidden=true; $("workspace").hidden=false;
+    $("identity").textContent=`${state.identity.actor} · ${state.identity.role}`;
+    $("count-open").textContent=state.cases.filter(c=>c.state!=="CLOSED").length;
+    $("count-approval").textContent=state.cases.filter(c=>c.state==="AWAITING_APPROVAL").length;
+    $("count-evidence").textContent=state.receipts.length;
+    $("ledger-status").textContent=state.ledger_valid?"Verified":"Mismatch";
+    $("policy-status").textContent=state.policy.kill_switch||state.policy.freeze?"Execution halted by policy":"Policy active · USD simulation budget " + state.policy.budget;
+    $("admin-controls").hidden=state.identity.role!=="policy_admin";
+    if(!selected && state.cases.length) selected=state.cases[state.cases.length-1].id;
+    renderCases(); renderEvidence(); renderTenders();
+  } catch(error) { message(error.message,true); }
+}
+function renderCases() {
+  $("case-list").innerHTML=state.cases.length?[...state.cases].reverse().map(c=>`<button class="case-item ${c.id===selected?"active":""}" data-case="${esc(c.id)}"><strong>${esc(c.title)}</strong><div class="case-meta"><span>#${short(c.id)} · ${c.receipt_ids.length} receipts</span><span class="badge ${c.state==="CLOSED"?"closed":""}">${esc(c.state.replaceAll("_"," "))}</span></div></button>`).join(""):'<div class="empty"><span>✓</span><h2>No open observations</h2><p>Set a degraded scenario and collect telemetry to open your first case.</p></div>';
+  const c=state.cases.find(c=>c.id===selected);
+  if(!c) return;
+  const plan=state.plans.find(p=>p.id===c.plan_id), receipts=state.receipts.filter(r=>c.receipt_ids.includes(r.id));
+  const latest=receipts[receipts.length-1], approvals=state.approvals.filter(a=>a.plan_id===c.plan_id);
+  const permit=[...state.permits].reverse().find(p=>p.plan_id===c.plan_id && p.status==="issued");
+  const job=[...state.operations].reverse().find(o=>o.case_id===c.id);
+  const steps=["DETECTED","PLANNED","AWAITING_APPROVAL","POST_CHECK","CLOSED"];
+  let buttons="";
+  const btn=(label,action,id,primary=false)=>`<button ${primary?'class="primary"':''} data-action="${action}" data-id="${esc(id)}">${label}</button>`;
+  if(["DETECTED","HELD","ESCALATED"].includes(c.state)) buttons+=btn("Prepare repair plan","plan",c.id,true);
+  if(plan?.status==="DRAFT") buttons+=btn("Verify evidence","verify",plan.id,true);
+  if(c.state==="AWAITING_APPROVAL") {
+    if(!approvals.some(a=>a.actor===state.identity.actor)) buttons+=btn("Approve this plan","approve",plan.id,true);
+    if(!permit) buttons+=btn("Request permit","permit",plan.id);
+    if(permit) buttons+=btn("Execute permitted action","execute",permit.id,true);
+  }
+  if(c.state==="RECONCILING"||c.state==="EXECUTING") buttons+=btn("Reconcile outcome","reconcile",job?.id,true);
+  if(c.state==="POST_CHECK") buttons+='<p class="muted">Action accepted. Set the recovered scenario and collect at least three fresh readings across the configured soak period (60 seconds by default).</p>';
+  $("case-detail").innerHTML=`<div class="section-title"><h2>${esc(c.asset_id)}</h2><span class="badge">${esc(c.state.replaceAll("_"," "))}</span></div><div class="detail-body"><div class="steps">${steps.map((s,i)=>`<span class="${i<=steps.indexOf(c.state)?"done":""}">${s.replaceAll("_"," ")}</span>`).join("")}</div><p>Thermal threshold observation. Component failure is not established; inspect cooling, airflow and workload before maintenance.</p><div class="detail-label">LATEST EVIDENCE</div><div class="detail-value">${latest?`${esc(latest.body.temperature)} °C · ${esc(date(latest.body.observed_at))}`:"No readings"}</div><small>${latest?`${esc(latest.body.timestamp_basis)} timestamp · receipt ${short(latest.id)}`:""}</small><div class="detail-label">PLAN</div><div class="detail-value">${plan?`${esc(plan.action)} · ${esc(plan.currency)} ${esc(plan.amount)}`:"Not prepared"}</div>${plan?`<small>Approved scope hash</small><div class="detail-value"><code>${esc(plan.hash)}</code></div>`:""}<div class="detail-label">APPROVALS</div><div class="detail-value">${approvals.map(a=>`${esc(a.actor)} (${esc(a.role)})`).join(", ")||"No approvals recorded"}</div><div class="detail-label">RECOVERY</div><div class="detail-value">${c.healthy_samples} qualifying samples${c.state==="CLOSED"?" · outcome verified":""}</div><div class="actions">${buttons}</div></div>`;
+}
+function renderEvidence() {
+  $("evidence-list").innerHTML=[...state.receipts].reverse().slice(0,100).map(r=>`<article class="record"><strong>${esc(r.body.asset_id)} · ${esc(r.body.temperature)} °C <span class="pill">${esc(r.environment)}</span></strong><p>Measured ${esc(date(r.body.observed_at))} · retrieved ${esc(date(r.retrieved_at))} · maximum age ${r.max_age}s</p><code>${esc(r.sha256)}</code><details><summary>Inspect receipt</summary><pre>${esc(JSON.stringify(r,null,2))}</pre></details></article>`).join("")||'<div class="empty">No evidence collected yet.</div>';
+}
+function renderTenders() {
+  $("tender-results").innerHTML=[...state.tenders].reverse().map(t=>`<section class="card"><div class="section-title"><h2>Bid comparison · ${esc(t.currency)}</h2><span class="pill">DRAFT ONLY</span></div>${t.ranked.map((b,i)=>`<div class="tender-row"><strong>${i+1}. ${esc(b.supplier)}</strong><span>${esc(b.total)} ${esc(t.currency)}</span><small>Evidence: ${esc(b.evidence_id)}</small></div>`).join("")}${t.excluded.map(b=>`<div class="record"><strong>${esc(b.supplier)} · excluded</strong><p>${esc(b.reason)}</p></div>`).join("")}<div class="record"><small>${esc(t.methodology)}</small></div></section>`).join("");
+}
+$("login-form").addEventListener("submit",e=>{e.preventDefault();token=$("token").value.trim();sessionStorage.setItem("watcher-token",token);$("token").value="";refresh();});
+$("logout").addEventListener("click",()=>{token="";sessionStorage.removeItem("watcher-token");$("workspace").hidden=true;$("login").hidden=false;});
+$("refresh").addEventListener("click",refresh);
+document.querySelectorAll("[data-view]").forEach(button=>button.addEventListener("click",()=>{activeView=button.dataset.view;document.querySelectorAll(".view").forEach(el=>el.hidden=el.id!==`view-${activeView}`);document.querySelectorAll(".nav").forEach(el=>el.classList.toggle("active",el===button));$("breadcrumb").textContent=button.textContent.trim();}));
+$("case-list").addEventListener("click",e=>{const button=e.target.closest("[data-case]");if(button){selected=button.dataset.case;renderCases();}});
+$("case-detail").addEventListener("click",e=>{const button=e.target.closest("[data-action]");if(!button)return;const action=button.dataset.action;const key=({plan:"case_id",execute:"permit_id",reconcile:"operation_id"})[action]||"plan_id";act(`/api/${action}`,{[key]:button.dataset.id},`${button.textContent}: complete.`);});
+$("set-scenario").addEventListener("click",()=>act("/api/scenario",{scenario:$("scenario").value},"Scenario set. Collect telemetry to observe it."));
+$("collect").addEventListener("click",()=>act("/api/collect",{},"Telemetry collected and receipted."));
+$("kill-on").addEventListener("click",()=>act("/api/controls",{kill_switch:true},"Execution halted."));
+$("kill-off").addEventListener("click",()=>act("/api/controls",{kill_switch:false},"Policy resumed. Existing permits still require validation."));
+$("sample-bids").addEventListener("click",()=>{$("bids").value=JSON.stringify(["Regional Service Co","OEM Service","Unverified Lead"].map((supplier,i)=>({supplier,unit_price:["100.10","130.00","50.00"][i],quantity:3,freight:"10.00",tax:"5.00",currency:"USD",qualified:i<2,screened:true,evidence_id:`simulation-bid-${i+1}`,availability_confirmed:i<2,expires_at:Math.floor(Date.now()/1000)+86400})),null,2);});
+$("compare-bids").addEventListener("click",()=>{try{act("/api/tender/compare",{currency:"USD",bids:JSON.parse($("bids").value)},"Bid comparison saved as draft.");}catch(error){message(error.message,true);}});
+$("load-audit").addEventListener("click",async()=>{try{const events=await api("/api/events");$("audit-list").innerHTML=events.reverse().slice(0,200).map(event=>`<div class="record"><strong>#${event.seq} · ${esc(event.kind)}</strong><p>${esc(date(event.at))}</p><code>${esc(event.hash)}</code><details><summary>Event payload</summary><pre>${esc(JSON.stringify(event.payload,null,2))}</pre></details></div>`).join("");}catch(error){message(error.message,true);}});
+refresh();

@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "watcher-fleet": {
+      "command": "python",
+      "args": ["-m", "overwatch", "mcp", "--zone", "fleet", "--db", "/absolute/path/to/WatcherMCP/data/overwatch.db"]
+    },
+    "watcher-records": {
+      "command": "python",
+      "args": ["-m", "overwatch", "mcp", "--zone", "records", "--db", "/absolute/path/to/WatcherMCP/data/overwatch.db"]
+    },
+    "watcher-market": {
+      "command": "python",
+      "args": ["-m", "overwatch", "mcp", "--zone", "market", "--db", "/absolute/path/to/WatcherMCP/data/overwatch.db"]
+    }
+  }
+}

@@ -1,0 +1,41 @@
+name: Verification
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  contracts:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ['3.11', '3.13']
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Run behavioral and architecture contracts
+        run: python -W error::ResourceWarning -m unittest discover -s tests -v
+      - name: Compile source
+        run: python -m compileall -q overwatch
+      - name: Validate browser JavaScript
+        run: node --check overwatch/web/app.js
+  upstream-redfish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Fetch pinned DMTF server
+        run: |
+          git clone https://github.com/DMTF/Redfish-Mockup-Server.git "$RUNNER_TEMP/dmtf"
+          git -C "$RUNNER_TEMP/dmtf" checkout --detach 23d21f9a3610f6b6fbb71ffc941296b159a524d2
+          python -m pip install -r integrations/dmtf/requirements.lock
+      - name: Run upstream contract tests
+        env:
+          WATCHER_DMTF_REPO: ${{ runner.temp }}/dmtf
+        run: python -m unittest tests.test_dmtf -v
