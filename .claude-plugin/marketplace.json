@@ -1,0 +1,18 @@
+{
+  "name": "watchermcp",
+  "owner": {
+    "name": "WatcherMCP",
+    "url": "https://github.com/pravj24/WatcherMCP"
+  },
+  "metadata": {
+    "description": "Hardware Overwatch — evidence-first hardware operations MCP for Claude Code.",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "watchermcp",
+      "source": "./plugin",
+      "description": "Read-only MCP trust zones (fleet, records, market) over the Overwatch evidence store, for Claude Code."
+    }
+  ]
+}
