@@ -181,6 +181,22 @@ class AssistTests(unittest.TestCase):
         with self.assertRaises(Exception):
             ZhipuClient("")
 
+    def test_zhipu_surfaces_the_api_error_body(self):
+        import io
+        import urllib.error
+        from overwatch.errors import Rejected
+
+        def opener(request, timeout=None):
+            raise urllib.error.HTTPError(request.full_url, 429, "Too Many Requests", {},
+                io.BytesIO(json.dumps({"error": {"code": "1113",
+                    "message": "Insufficient balance or no resource package."}}).encode()))
+
+        client = ZhipuClient("key", opener=opener)
+        with self.assertRaises(Rejected) as caught:
+            client.complete(system="s", messages=[{"role": "user", "content": "hi"}], tools=[])
+        self.assertIn("1113", str(caught.exception))
+        self.assertIn("Insufficient balance", str(caught.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

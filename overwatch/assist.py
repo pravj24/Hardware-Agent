@@ -157,6 +157,14 @@ class ZhipuClient:
         try:
             with self._opener(request, timeout=self.timeout) as response:
                 payload = json.loads(response.read())
+        except urllib.error.HTTPError as exc:
+            detail = ""
+            try:
+                error = json.loads(exc.read()).get("error") or {}
+                detail = " (" + str(error.get("code")) + ": " + str(error.get("message")) + ")"
+            except (ValueError, TypeError, AttributeError):
+                pass
+            raise Rejected("Zhipu request failed: HTTP " + str(exc.code) + detail) from exc
         except (urllib.error.URLError, TimeoutError, ValueError, OSError) as exc:
             raise Rejected("Zhipu request failed: " + str(exc)) from exc
         choices = payload.get("choices")
