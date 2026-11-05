@@ -11,17 +11,19 @@ from pathlib import Path
 import threading
 from urllib.parse import urlsplit
 
+from .discovery import discover_providers
 from .errors import Rejected
 from .redfish import RedfishError
+from .scoring import rank_candidates
 from .service import new_id
 from .tender import compare_bids
 
 
 class APIServer:
-    def __init__(self, app, collector, *, identities, host="127.0.0.1", port=8080):
+    def __init__(self, app, collector, *, identities, discovery=None, host="127.0.0.1", port=8080):
         if host not in {"127.0.0.1", "localhost"}:
             raise ValueError("development API must bind to loopback")
-        self.app, self.collector, self.identities = app, collector, identities
+        self.app, self.collector, self.identities, self.discovery = app, collector, identities, discovery
         self.thread = None
         api = self
         static = Path(__file__).parent / "web"
@@ -112,7 +114,8 @@ class APIServer:
                     "/api/approve": {"operator", "procurement", "finance"},
                     "/api/permit": {"operator", "procurement"}, "/api/execute": {"operator", "procurement"},
                     "/api/reconcile": {"operator", "procurement"}, "/api/controls": {"policy_admin"},
-                    "/api/tender/compare": {"procurement"}}
+                    "/api/tender/compare": {"procurement"}, "/api/tender/discover": {"procurement"},
+                    "/api/tender/score": {"procurement"}}
                 if route not in permissions:
                     return self.send(404, {"error": "route not found"})
                 if identity["role"] not in permissions[route]:
@@ -177,12 +180,29 @@ class APIServer:
             if app.environment != "simulation":
                 raise Rejected("manual bid intake in this release is simulation-only")
             result = compare_bids(body["bids"], now=app.clock(), currency=body.get("currency", "USD"))
-            result.update(id=new_id("tender"), environment="simulation", reviewed_by=identity["actor"], created_at=app.clock())
-            with app.store.transaction() as tx:
-                tx.put("tenders", result)
-                tx.event("tender_compared", result, app.clock())
-            return result
+            return self._record_tender("bid_comparison", "tender_compared", result, identity)
+        if route == "/api/tender/discover":
+            if app.environment != "simulation":
+                raise Rejected("provider discovery in this release is simulation-only")
+            result = discover_providers(body["need"], approved_vendors=body.get("approved_vendors"),
+                                        client=self.discovery, now=app.clock(),
+                                        blocked=body.get("blocked"), sanctioned=body.get("sanctioned"))
+            return self._record_tender("discovery", "providers_discovered", result, identity)
+        if route == "/api/tender/score":
+            if app.environment != "simulation":
+                raise Rejected("qualification scoring in this release is simulation-only")
+            result = rank_candidates(body["candidates"], weights=body.get("weights"))
+            return self._record_tender("shortlist", "candidates_scored", result, identity)
         raise Rejected("unknown action")
+
+    def _record_tender(self, kind, event, result, identity):
+        app = self.app
+        result.update(id=new_id("tender"), kind=kind, environment="simulation",
+                      reviewed_by=identity["actor"], created_at=app.clock())
+        with app.store.transaction() as tx:
+            tx.put("tenders", result)
+            tx.event(event, result, app.clock())
+        return result
 
     def start(self):
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)

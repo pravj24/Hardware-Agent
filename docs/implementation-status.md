@@ -12,6 +12,8 @@
 | Authorization | Trusted role mapping, independent procurement/finance approvals at USD 1,000, plan-bound approvals, 120-second signed permits, freeze and kill switch |
 | Broker | Atomic durable claim, single-use permit, exact approved plan, budget reservation/settlement, no blind retries, status reconciliation |
 | Outcomes | At least three post-action healthy samples over the configured soak; stale data, regression and long gaps reset recovery; procurement drafts wait for fulfillment |
+| Tender discovery | Crustdata company-search client (live, token-gated) plus a keyless fixture of real captured maintainer records; approved-vendor list loaded first; leads normalised to typed fields only (free-text descriptions dropped), marked indicative and unqualified; deterministic compliance screen removes supplied sanctioned/blocked suppliers with a reason; Crustdata outage degrades to approved vendors only without guessing |
+| Tender scoring | Six-factor weighted qualification rubric (customer-overridable, must sum to 100); pre-qualification must be verified at source to rank; each unverified factor scores zero, not partial; Crustdata signals carried as corroboration only, never authoritative; exact Decimal arithmetic |
 | Tender comparison | Reviewed simulation inputs, qualification/screening/availability flags, quote reference and expiry, exact Decimal arithmetic, scope/quantity consistency, no implicit currency conversion |
 | Interfaces | Authenticated local API, operations dashboard, three read-only MCP stdio zones |
 | Verification lab | Stateful in-process fixture server plus a separate actual DMTF integration pinned to a commit |
@@ -24,7 +26,7 @@
 - Fleet-scale monitoring, DCGM/SNMP collectors, EventService subscriptions, full OEM schemas, topology-aware cross-node case merging and facility-cause diagnosis.
 - Trained survival/failure models, validated RUL estimates, drift monitoring or benchmark claims. A temperature threshold is only a test trigger.
 - Hosted LLM orchestration or autonomous specialist agents. MCP permits model-assisted read-only analysis; it cannot approve or execute.
-- Real Crustdata discovery/watches, sanctions-list screening, source verification of qualification documents, RFI/RFQ delivery, contract entitlement APIs or financial commitments.
+- Crustdata *watches* (discovery/entity monitoring), live sanctions/entity-list *data* (the screen matches only a caller-supplied blocked/sanctioned list, not a subscribed list), source verification of qualification documents (certs with the issuer, insurance with the broker, reference checks), RFI/RFQ delivery, contract entitlement APIs or financial commitments. Discovery produces indicative leads and scoring consumes reviewed verification inputs; neither performs real supplier outreach, document verification or award.
 - CMMS/ERP/ITSM integration or scheduler drain. Requisition execution goes to an explicitly simulated endpoint.
 - Real reset, fan controls, firmware updates, rollback or hardware recovery. No such action is allow-listed.
 - Provider performance scoring and verified business savings reporting.

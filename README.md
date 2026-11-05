@@ -30,7 +30,9 @@ The default ports are 8080 (desk) and 8001 (lab). Override them with `--port` an
 
 For a quick UI demonstration, start with `python -m overwatch demo --soak-seconds 0`; three distinct post-action samples are still required. The shortened soak is a test setting, not a production recommendation.
 
-Try **Lost action response** to exercise `RECONCILING`, or **Stale telemetry** to see verification refuse the plan. Switch to the `policy_admin` token to halt execution. Use the `procurement` token in Tenders to compare the provided sample bids. The role comes from the token configuration, never from a request body.
+Try **Lost action response** to exercise `RECONCILING`, or **Stale telemetry** to see verification refuse the plan. Switch to the `policy_admin` token to halt execution. Use the `procurement` token in **Tenders** to run the tender engine: **Discover providers** widens the shortlist beyond the incumbent OEM through Crustdata (indicative leads only; sanctioned/blocked suppliers are screened out with a reason), **Score candidates** ranks verified providers on the weighted rubric with unverified factors scoring zero, and **Compare bids** normalises the sample bids. The role comes from the token configuration, never from a request body.
+
+Discovery runs against a keyless fixture of real captured third-party-maintainer records by default; set `WATCHER_CRUSTDATA_TOKEN` before `python -m overwatch demo` to query live Crustdata company search instead. If Crustdata is unavailable, discovery degrades to the approved vendor list only and says so.
 
 ## Test-driven implementation
 
@@ -115,6 +117,8 @@ overwatch/
   api.py           Authenticated loopback API and UI hosting
   mcp.py           Read-only stdio tools split by trust zone
   tender.py        Deterministic bid eligibility and comparison
+  discovery.py     Crustdata provider discovery (live client + keyless fixture), compliance screen
+  scoring.py       Weighted qualification rubric; unverified factors score zero
   web/             Operations desk
 tests/             Behavioral, HTTP, MCP, architecture and upstream tests
 integrations/dmtf/ Pinned upstream manifest, dependency lock and Docker recipe

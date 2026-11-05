@@ -12,7 +12,7 @@ TOOL_SETS = {
     "fleet": {"fleet.get_observations": ("Read normalized telemetry receipts", "receipts", "asset_id")},
     "records": {"records.get_cases": ("Read durable case summaries", "cases", "asset_id"),
                 "records.get_plans": ("Read proposed maintenance plans", "plans", "case_id")},
-    "market": {"market.get_tenders": ("Read simulation tender comparisons; not supplier qualification", "tenders", None)},
+    "market": {"market.get_tenders": ("Read simulation tender records: discovery long-lists, scored shortlists and bid comparisons. Crustdata leads are indicative, not supplier qualification", "tenders", None)},
 }
 
 
