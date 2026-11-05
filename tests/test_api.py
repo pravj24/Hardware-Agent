@@ -6,6 +6,7 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from overwatch.api import APIServer
+from overwatch.discovery import FixtureDiscoveryClient
 from overwatch.redfish import RedfishClient, SimulationAdapter
 from overwatch.service import Overwatch
 from overwatch.simulator import LabServer
@@ -20,9 +21,10 @@ class APITests(unittest.TestCase):
         self.client = RedfishClient(self.lab.url)
         self.app = Overwatch(Path(self.temp.name) / "db.sqlite", b"x" * 32,
                              adapter=SimulationAdapter(self.client), soak_seconds=0)
-        self.server = APIServer(self.app, self.client, port=0, identities={
+        self.server = APIServer(self.app, self.client, port=0, discovery=FixtureDiscoveryClient(), identities={
             "operator-secret": {"actor": "sre", "role": "operator"},
             "viewer-secret": {"actor": "reader", "role": "viewer"},
+            "procurement-secret": {"actor": "buyer", "role": "procurement"},
             "admin-secret": {"actor": "security", "role": "policy_admin"}}).start()
         self.addCleanup(self.server.close)
 
@@ -92,3 +94,28 @@ class APITests(unittest.TestCase):
 
     def test_unknown_route_returns_json_error(self):
         self.assertEqual(self.request("/api/not-a-route", {})[0], 404)
+
+    def test_discovery_and_scoring_require_procurement_and_persist(self):
+        need = {"query": "data center server hardware maintenance"}
+        # Operator may run the repair workflow but not the tender desk.
+        self.assertEqual(self.request("/api/tender/discover", {"need": need})[0], 403)
+        status, discovery = self.request("/api/tender/discover",
+            {"need": need, "approved_vendors": [{"name": "Incumbent OEM"}], "sanctioned": ["evernex.com"]},
+            token="procurement-secret")
+        self.assertEqual(status, 200)
+        self.assertEqual(discovery["kind"], "discovery")
+        names = {lead["name"] for lead in discovery["leads"]}
+        self.assertIn("Incumbent OEM", names)
+        self.assertNotIn("Evernex", names)  # removed by the sanctions screen
+        self.assertTrue(all(lead["authority"] in {"indicative", "approved_vendor"} for lead in discovery["leads"]))
+
+        candidate = {"provider": "Incumbent OEM", "qualification_verified": True,
+                     "factors": {f: {"verified": True, "strength": 1.0} for f in
+                                 ["capability", "coverage_sla", "past_performance", "price", "stability", "security"]}}
+        status, shortlist = self.request("/api/tender/score", {"candidates": [candidate]}, token="procurement-secret")
+        self.assertEqual(status, 200)
+        self.assertEqual(shortlist["ranked"][0]["score"], "100.00")
+        self.assertEqual(shortlist["recommendation"], "Incumbent OEM")
+
+        kinds = {t["kind"] for t in self.app.snapshot()["tenders"]}
+        self.assertEqual(kinds, {"discovery", "shortlist"})

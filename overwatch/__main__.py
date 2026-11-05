@@ -8,6 +8,7 @@ import sys
 import time
 
 from .api import APIServer
+from .discovery import CrustdataClient, FixtureDiscoveryClient
 from .mcp import MCPServer
 from .redfish import RedfishClient, SimulationAdapter
 from .service import Overwatch
@@ -95,9 +96,13 @@ def main():
             client = RedfishClient(lab.url, lab_token=tokens["lab"])
             app = Overwatch(args.data / "overwatch.db", key, adapter=SimulationAdapter(client), soak_seconds=0 if hackathon else args.soak_seconds)
             identities = {value: {"actor": role + "-local", "role": role} for role, value in tokens.items() if role != "lab"}
+            # Live Crustdata discovery when a token is configured; otherwise a keyless fixture
+            # with real captured third-party-maintainer records, so the demo needs no account.
+            token = os.environ.get("WATCHER_CRUSTDATA_TOKEN")
+            discovery = CrustdataClient(token) if token else FixtureDiscoveryClient()
             # In-flight actions survive application restarts; simulator restarts do not recreate lost remote outcomes.
             app.recover_inflight()
-            api = APIServer(app, client, identities=identities, port=args.port, hackathon=hackathon).start()
+            api = APIServer(app, client, identities=identities, port=args.port).start()
             print(f"Operations desk: {api.url}", flush=True)
             print("Open the desk and paste the operator token. Ctrl+C stops both services.", flush=True)
             if hackathon:

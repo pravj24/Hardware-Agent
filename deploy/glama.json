@@ -1,0 +1,43 @@
+{
+  "$schema": "https://glama.ai/mcp/schemas/server.json",
+  "name": "watchermcp",
+  "version": "0.1.0",
+  "description": "Evidence-first hardware remediation and Redfish verification MCP servers split across three read-only trust zones (fleet, records, market).",
+  "repository": "https://github.com/pravj24/WatcherMCP",
+  "license": "MIT",
+  "maintainers": [
+    {
+      "name": "pravj24",
+      "url": "https://github.com/pravj24"
+    }
+  ],
+  "transports": ["streamable-http", "sse", "stdio"],
+  "endpoints": {
+    "fleet": "/mcp/fleet",
+    "records": "/mcp/records",
+    "market": "/mcp/market",
+    "health": "/health"
+  },
+  "tools": [
+    {
+      "name": "fleet.get_observations",
+      "zone": "fleet",
+      "description": "Read normalized telemetry receipts filtered optionally by asset_id."
+    },
+    {
+      "name": "records.get_cases",
+      "zone": "records",
+      "description": "Read durable hardware anomaly case summaries filtered optionally by asset_id."
+    },
+    {
+      "name": "records.get_plans",
+      "zone": "records",
+      "description": "Read proposed maintenance plans filtered optionally by case_id."
+    },
+    {
+      "name": "market.get_tenders",
+      "zone": "market",
+      "description": "Read simulation tender records: discovery long-lists, scored shortlists, and bid comparisons."
+    }
+  ]
+}
