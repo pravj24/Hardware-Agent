@@ -29,10 +29,10 @@ what is fixture-only, and what remains unimplemented.
 | Tender discovery | Crustdata company-search client (live, token-gated) plus a keyless fixture of real captured maintainer records; approved-vendor list loaded first; leads normalised to typed fields only (free-text descriptions dropped), marked indicative and unqualified; deterministic compliance screen removes supplied sanctioned/blocked suppliers with a reason; Crustdata outage degrades to approved vendors only without guessing |
 | Tender scoring | Six-factor weighted qualification rubric (customer-overridable, must sum to 100); pre-qualification must be verified at source to rank; each unverified factor scores zero, not partial; Crustdata signals carried as corroboration only, never authoritative; exact Decimal arithmetic |
 | Tender comparison | Reviewed simulation inputs, qualification/screening/availability flags, quote reference and expiry, exact Decimal arithmetic, scope/quantity consistency, no implicit currency conversion |
-| Interfaces | Authenticated local API, operations dashboard, three read-only MCP stdio zones |
-| Dashboard assistant | Server-side LLM over a provider-neutral, bounded, append-only tool-use loop that drafts maintenance messages, approval summaries and tender searches. Providers: Zhipu AI / GLM (`glm-4.6`, OpenAI-compatible, stdlib urllib, no SDK) or Claude (`claude-opus-5-5`, official SDK lazily imported), chosen from the environment; offline stub without a key. Tools are read/draft-only (case evidence, Crustdata discovery, recent tenders); it cannot approve, send or execute, and is instructed to use only tool-returned figures. Each invocation is audited to the ledger |
+| Interfaces | Authenticated local API, separate static NOC dashboard with live onboarding/Gemini and simulated operations visuals, three read-only MCP stdio zones |
+| Dashboard assistant | Native Gemini REST adapter with preserved function-call signatures/IDs and a bounded read/draft tool loop. Server-only `GEMINI_API_KEY`; explicit offline stub without a key. Drafts are unverified and cannot approve, send or execute. Each successful invocation is audited. Scripted transport tests cover the contract; live model access and output quality require separate verification |
 | Verification lab | Stateful in-process fixture server plus a separate actual DMTF integration pinned to a commit |
-| CI | Python 3.11/3.13 on Windows/Linux; separate upstream DMTF job |
+| CI | Python 3.11/3.13 on Linux and 3.13 on Windows; upstream DMTF, frontend build/tests and MCP gateway jobs |
 
 ## Explicitly not implemented
 
@@ -40,7 +40,7 @@ what is fixture-only, and what remains unimplemented.
 - Distributed durable workflow engine, replicated stores, transactional outbox, multi-tenant authorization, retention management and immutable external ledger anchoring.
 - Fleet-scale monitoring, DCGM/SNMP collectors, EventService subscriptions, full OEM schemas, topology-aware cross-node case merging and facility-cause diagnosis.
 - Trained survival/failure models, validated RUL estimates, drift monitoring or benchmark claims. A temperature threshold is only a test trigger.
-- Hosted LLM orchestration or autonomous specialist agents. MCP permits model-assisted read-only analysis; it cannot approve or execute.
+- Production model hosting configuration, model quality evaluation or autonomous specialist agents. Gemini supports bounded drafting; MCP permits read-only analysis. Neither can approve or execute.
 - Crustdata *watches* (discovery/entity monitoring), live sanctions/entity-list *data* (the screen matches only a caller-supplied blocked/sanctioned list, not a subscribed list), source verification of qualification documents (certs with the issuer, insurance with the broker, reference checks), RFI/RFQ delivery, contract entitlement APIs or financial commitments. Discovery produces indicative leads and scoring consumes reviewed verification inputs; neither performs real supplier outreach, document verification or award.
 - CMMS/ERP/ITSM integration or scheduler drain. Requisition execution goes to an explicitly simulated endpoint.
 - Real reset, fan controls, firmware updates, rollback or hardware recovery. No such action is allow-listed.

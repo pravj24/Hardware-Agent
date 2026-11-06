@@ -1,36 +1,27 @@
-# WatcherMCP — Hardware Overwatch NOC & Agent Operations Frontend
+# WatcherMCP frontend
 
-This folder provides a live-deployable frontend dashboard for [`WatcherMCP`](https://github.com/pravj24/WatcherMCP), combining:
-1. **NOC 256-Monitor Matrix & Real-Time Telemetry Charts** (`Current Status of All Monitors`, Down/Critical/Trouble/Soak counters, IST clock, and live thermal/packet charts).
-2. **Fleet Node Status Cards (`watchermcp.app/dashboard`)** with per-node `CPU`, `MEM`, and `TEMP` bars and instant node selection.
-3. **Server & Redfish BMC Drilldown + 8-Stage Hardware Overwatch Lifecycle** (`Observe -> Gather Receipts -> Plan -> Verify -> Approve -> Permit -> Execute -> Verify Recovery`), 6-Factor Vendor Tender scoring, Read-Only MCP Trust Zone inspector (`fleet`, `records`, `market`), and SHA-256 Audit Ledger viewer.
-4. **Start-of-Day Operator Login & Shift Handover Popup** and **Critical Anomaly / Fault Incident Popup**.
-5. **Live Enterprise Onboarding** (the `🚀 Onboard` rail / `Enterprise Onboarding · live` tab) — a **functional** 7-phase gated onboarding driven by the real backend API, with an in-browser simulation fallback when no backend is reachable.
+This is the current NOC dashboard. Charts, fleet, lifecycle, tender scores, MCP inspector and ledger visuals are deterministic browser simulations. Onboarding and the Gemini draft panel call the Python backend. The visual role selector and kill switch control only the browser simulation.
 
-This is the **single** dashboard UI for WatcherMCP; the old `overwatch/web/` desk has been removed and the Python backend is now API-only.
+## Develop and build
 
-## Deploy the webapp
+From the repository root with Node 20+:
 
-The `frontend/` directory is a self-contained static webapp (Tailwind + inline JS, no build step). Deploy it directly:
-
-```bash
-# Vercel
-vercel --prod            # uses frontend/vercel.json
-
-# Netlify
-netlify deploy --prod --dir=frontend   # uses frontend/netlify.toml
-
-# Or GitHub Pages / any static host — just serve frontend/ as the web root.
+```sh
+npm ci
+npm run dev
+npm test
+npm run build
+npm run preview
 ```
 
-All the NOC matrix, fleet, lifecycle, tender, MCP-zone and audit views run from the deterministic in-browser simulation, so the deployed site works with **zero backend**.
+Development and preview serve `http://127.0.0.1:5173`; override `HOST`/`PORT` if needed. Development rebuilds once on startup; rerun after editing source. Production output is `frontend/dist/`. The build compiles pinned Tailwind 3.4.17 locally and replaces the development CDN script. It never embeds environment variables. Source remains `index.html` with inline application JavaScript.
 
-## Live onboarding (connect to the backend)
+## Connect to the API
 
-The **Onboarding** view is functional against a running Overwatch backend:
+In another terminal run `python -m pip install -e .` then `python -m overwatch demo`. Open Onboarding, enter `http://127.0.0.1:8080` and a role token from `data/demo-credentials.json`, and connect. Operator/procurement tokens can use Tenders → Gemini drafting assistant. Configure `GEMINI_API_KEY` only in the backend environment; missing keys produce an explicit offline stub. Browser onboarding settings store the API URL and role token in localStorage; use demo credentials here, not production credentials.
 
-1. Start the backend (API-only): `python -m overwatch demo --port 8080` (prints the API URL and the role-token credentials file).
-2. Open the dashboard → **Onboard** → set the **API base URL** (default `http://127.0.0.1:8080`) and paste a **role token** from `data/demo-credentials.json`, then **Connect**.
-3. The view loads live gate status and shows the actions your role may take — `policy_admin` starts onboarding and loads config, gate owners sign their gates, `operator`/`security_lead` run the Redfish probe, `risk_lead` starts T0 shadow mode.
+## Deploy
 
-The API base URL and token are stored in the browser's `localStorage`. The backend sends permissive CORS, so the deployed static site can point at any reachable Overwatch API. If the backend is unreachable, the view falls back to the in-browser onboarding simulation.
+Preferred project root: repository root. Netlify/Vercel settings run `npm run build` and publish `frontend/dist/`; the root workspace lockfile enables reproducible `npm ci`. If using `frontend/` as the project root, allow access to the repository workspace root/lockfile during dependency installation; its configuration publishes `dist/`.
+
+Any static host can publish the built `frontend/dist/` directory. Do not deploy the unbuilt source directory. Static hosting alone runs the visual simulation; live features need a separately deployed backend. An HTTPS dashboard needs an HTTPS API, reachable from the user's browser. The included API uses loopback development serving and permissive CORS; production hosting needs authentication, TLS and a restricted origin policy.

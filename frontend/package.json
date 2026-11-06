@@ -1,0 +1,16 @@
+{
+  "name": "@watchermcp/frontend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Deployable static WatcherMCP operations dashboard",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "dev": "node scripts/build.mjs && node scripts/serve.mjs",
+    "build": "node scripts/build.mjs",
+    "preview": "node scripts/serve.mjs",
+    "start": "node scripts/serve.mjs",
+    "test": "node --test tests/*.test.mjs"
+  },
+  "devDependencies": { "tailwindcss": "3.4.17" }
+}

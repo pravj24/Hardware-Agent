@@ -2,37 +2,48 @@
 
 The seven onboarding phases are connected to the operations desk using fictional enterprise data and a running three-node Redfish simulator. No external account, API key, cloud deployment, language-model subscription or hardware is needed.
 
-## Run and open
+## Run the API rehearsal
 
-From `WatcherMCP`:
+The current frontend is a separate NOC application. It has live onboarding and Gemini drafting, but the old guided hackathon buttons were retired with `overwatch/web/`. Port 8080 serves JSON, not a dashboard. Use the API sequence below for the complete fictional journey, or `npm ci` / `npm run dev` for the dashboard at port 5173.
 
-```bash
-bash scripts/run-hackathon.sh
+Start an isolated backend from `WatcherMCP`:
+
+```powershell
+python -m overwatch demo --hackathon --data data/hackathon
 ```
 
-Open **http://127.0.0.1:8080** and click **Enter hackathon demo**. No token copying is needed. This shortcut is available only when the server is explicitly launched with `--hackathon` and still obeys the loopback host/origin boundary. Standard mode retains its normal token login.
+In another PowerShell terminal:
 
-Runtime data is stored under `/tmp/overwatch-hackathon-runtime`. The earlier standard workspace at `/tmp/hardware-overwatch-runtime` is preserved. `/tmp` may be cleared at reboot; set `WATCHER_DEMO_DATA` to another writable directory if desired. Stop the server with Ctrl+C.
-
-Equivalent command:
-
-```bash
-python3 -m overwatch demo --hackathon --data /tmp/overwatch-hackathon-runtime
+```powershell
+$base = 'http://127.0.0.1:8080'
+$login = Invoke-RestMethod -Method Post -Uri "$base/api/demo/login" -ContentType 'application/json' -Body '{}'
+$headers = @{ Authorization = "Bearer $($login.token)" }
+Invoke-RestMethod -Method Post -Uri "$base/api/demo/prepare" -Headers $headers -ContentType 'application/json' -Body '{"name":"Aster Cloud","region":"India"}'
+foreach ($step in @('identity','inventory','telemetry','connectors','policy','ai','shadow')) {
+    $body = @{ step = $step } | ConvertTo-Json
+    Invoke-RestMethod -Method Post -Uri "$base/api/demo/step" -Headers $headers -ContentType 'application/json' -Body $body
+}
+Invoke-RestMethod -Uri "$base/api/demo/status" -Headers $headers
 ```
+
+The explicit `--hackathon` flag enables unauthenticated local presenter login. Use only for a local fictional demo. Standard mode requires the generated role tokens. Do not expose this mode to a public network.
 
 ## Present the journey
 
-1. Enter an organization name and region, then **Create demo workspace**.
-2. Click **Complete all seven phases**, or run each phase separately. Each phase generates evidence, invokes the existing gate checks, and records explicitly fictional owner reviews. A real failure of the local Redfish probe blocks progress.
-3. Review the three thermal cases created when onboarding reaches shadow mode. **Inspect case** opens the existing case/evidence workflow.
-4. **Draft maintenance request** creates a linked mock CMMS work order and local notice. Nothing is sent externally.
-5. **Compare service bids** opens the existing tender comparison: two eligible bids, one excluded lead, exact INR arithmetic. The lowest eligible sample bid is INR 13,400 for three nodes.
-6. Use the **Enterprise assistant** to summarize current cases, inspect temperatures, or create a proposal. Responses use current records and deterministic templates; no LLM is invoked, and the assistant cannot approve or execute.
-7. **Simulate technician repair + verify recovery** records a fictional external technician action, switches the lab to recovered, and closes cases only after three distinct fresh HTTP observations. The hackathon mode uses a zero-second soak so this demonstration takes seconds. The broker never executes a hardware repair.
-8. **Download evidence pack** exports onboarding, receipts, case history, artifacts, work orders, bids and the hash-chained audit ledger as JSON.
-9. Optionally **Export and simulate offboarding**: export first, revoke mock gateway tokens/certificates/enrollment tokens, and record account-removal/deletion simulation. Actual local history is retained for judging.
+After the seven phases, the three-node HTTP Redfish lab produces cases and verified recommendations at T0. Use the authenticated routes below; POST bodies are JSON and GET routes have no body.
 
-**Restart onboarding walkthrough** clears the current phase approvals and revokes mock access while retaining cases, evidence and audit history. It allows repeated presentations without deleting earlier work.
+| Action | Route and body |
+|---|---|
+| View cases and identity | GET `/api/state` |
+| Draft linked mock work order and notice | POST `/api/demo/draft` with `{"case_id":"<case ID>"}` |
+| Compare fictional service bids | POST `/api/demo/tender` with `{}` |
+| Read/propose template assistant | POST `/api/demo/assistant` with `{"question":"Summarize current cases"}` |
+| Simulated technician repair and fresh recovery checks | POST `/api/demo/recover` with `{}` |
+| Export evidence pack | GET `/api/demo/export` |
+| Simulate offboarding after export | POST `/api/demo/offboard` with `{}` |
+| Restart phase walkthrough, retain evidence history | POST `/api/demo/restart` with `{}` |
+
+The hackathon assistant uses deterministic templates and does not call an LLM. The separate `/api/assist` endpoint uses Gemini when configured. No route sends real maintenance messages, orders parts or repairs physical hardware. Recovery uses three distinct fresh samples and a zero-second demo soak. Export before simulated offboarding; local history is retained.
 
 ## What each phase demonstrates
 
@@ -46,24 +57,15 @@ python3 -m overwatch demo --hackathon --data /tmp/overwatch-hackathon-runtime
 | Enterprise AI | Two mock clients, allowed-scope manifest, audience/scope/expiry rejection tests, eight fake pilot users and one week of fake audit history; read/propose assistant uses current local records | A mock gateway contract and local assistant, not a hosted OAuth deployment or LLM integration |
 | Shadow and operations | All six preceding gates checked; 56 synthetic daily outcomes produce 48 recommendations, 40 confirmations and 83.3% synthetic precision; real local readings create and close cases | Eight weeks are represented by fake historical rows, not eight elapsed weeks. No autonomy promotion or production-performance claim |
 
-The UI distinguishes **demo readiness** from production readiness. Fake people and history are allowed for the hackathon and are labeled throughout the evidence pack. The full mock journey can complete; enterprise credentials are not required for it.
+The API distinguishes **demo readiness** from production readiness. Fake people and history are allowed for the hackathon and are labeled throughout the evidence pack. The full mock journey can complete; enterprise credentials are not required for it.
 
 ## Verification
 
 The suite exercises the complete journey plus failure cases: rejected enrollment reuse, vault isolation, forbidden gateway scopes, wrong audience/expiry, incorrect phase order, failed owner sign-off, real simulator outage, retained T0, exports without credential tokens, restart and offboarding.
 
-```bash
-python3 -m unittest discover -s tests -v
-PYTHONPYCACHEPREFIX=/tmp/overwatch-pycache python3 -m compileall -q overwatch
-node --check overwatch/web/hackathon.js
+```powershell
+python -m unittest tests.test_hackathon -v
+python -m compileall -q overwatch
 ```
 
-The browser runner uses an isolated temporary database and checks login, all seven phases, three nodes, nine connectors, drafts, the assistant, bids, export, recovery, page reload, mobile width, repeated incidents and offboarding:
-
-```bash
-PLAYWRIGHT_MODULE=/tmp/overwatch-browser/node_modules/playwright \
-PLAYWRIGHT_EXECUTABLE=/opt/google/chrome/chrome \
-node scripts/hackathon-smoke.cjs
-```
-
-The application needs only Python 3.11+. Playwright and Chrome are optional verification tools, installed/located at those paths in this environment. The runner prints a temporary artifact directory containing screenshots, the JSON export and its report.
+For the current dashboard, run `npm run build` then `node scripts/frontend-smoke.cjs` with Playwright installed. `PLAYWRIGHT_MODULE` can point to an existing package; `PLAYWRIGHT_CHANNEL=msedge` selects installed Edge. This browser check covers live onboarding connection and offline Gemini drafting; the full fictional hackathon journey is verified by the Python tests.

@@ -6,42 +6,33 @@ Evidence-first hardware operations, built around a tested permission boundary:
 
 This repository is a runnable reference implementation of the Hardware Overwatch architecture. It includes a local Redfish lab, an authenticated operations desk, durable workflow state, and read-only MCP servers. It deliberately does **not** enable real BMC writes, send RFQs, issue purchase orders, or claim validated failure prediction.
 
-## Run the operations desk
+## Run the dashboard and backend
 
-For the **integrated hackathon demo**, run `bash scripts/run-hackathon.sh`, open
-**http://127.0.0.1:8080**, and click **Enter hackathon demo**. All seven onboarding
-phases connect to a three-node Redfish lab, case recommendations, mock maintenance
-requests, bid comparison, an assistant, recovery checks and evidence export. Enterprise
-services, owners and historical data are fictional. No external credentials are needed.
-See the [complete presentation guide](docs/hackathon-demo.md).
-
-The commands below run the original manual operations lab without the guided demo.
-
-Requires Python 3.11 or newer. The application and default tests use only the Python standard library; no API key or package installation is needed.
+Requires Python 3.11+ and Node 20+. From the cloned `WatcherMCP` directory:
 
 ```powershell
-cd WatcherMCP
+python -m pip install -e .
 python -m overwatch demo
 ```
 
-Open **http://127.0.0.1:8080**. Copy the `operator` token from the generated `data/demo-credentials.json` into the login form. Tokens and the signing key are local files excluded from Git. Stop the services with Ctrl+C.
+In a second terminal in the same directory:
 
-The default ports are 8080 (desk) and 8001 (lab). Override them with `--port` and `--lab-port`. Use `--data another-local-directory` for a clean simulation environment.
+```powershell
+npm ci
+npm run dev
+```
 
-### Walk through a case
+Open **http://127.0.0.1:5173**. The Python process serves the API at **http://127.0.0.1:8080**, not the dashboard. Open **Onboarding**, enter that API URL and a role token from generated `data/demo-credentials.json`, then connect. Tokens and the signing key are excluded from Git. Stop each process with Ctrl+C. Override backend/lab ports with `--port` and `--lab-port`; use `--data another-local-directory` for a separate simulation database.
 
-1. Choose **Thermal degradation**, click **Set scenario**, then **Collect telemetry**.
-2. Select the case and **Prepare repair plan**.
-3. **Verify evidence**, then **Approve this plan**.
-4. **Request permit**, then **Execute permitted action**.
-5. The case stays in `POST_CHECK`: an HTTP success response has not fixed the sensor.
-6. Choose **Recovered**, set the scenario, and collect at least three fresh observations spanning 60 seconds. Only then does the case close.
+The NOC charts, lifecycle, tender visualization and audit animation are browser simulations. Onboarding and the Gemini drafting panel connect to the backend. The dashboard's visual role selector and kill switch affect the simulation; backend roles come from authenticated tokens. The retired `overwatch/web/` desk is not served.
 
-For a quick UI demonstration, start with `python -m overwatch demo --soak-seconds 0`; three distinct post-action samples are still required. The shortened soak is a test setting, not a production recommendation.
+### Exercise the backend workflow
 
-Try **Lost action response** to exercise `RECONCILING`, or **Stale telemetry** to see verification refuse the plan. Switch to the `policy_admin` token to halt execution. Use the `procurement` token in **Tenders** to run the tender engine: **Discover providers** widens the shortlist beyond the incumbent OEM through Crustdata (indicative leads only; sanctioned/blocked suppliers are screened out with a reason), **Score candidates** ranks verified providers on the weighted rubric with unverified factors scoring zero, and **Compare bids** normalises the sample bids. The role comes from the token configuration, never from a request body.
+The API implements observation → plan → verification → approval → permit → execution → recovery. The HTTP workflow tests exercise real local requests, lost responses and reconciliation. A successful simulated action leaves a case in `POST_CHECK` until three fresh observations span the configured recovery soak (60 seconds by default). `--soak-seconds 0` shortens only the lab timing. Production writes remain disabled.
 
-Discovery runs against a keyless fixture of real captured third-party-maintainer records by default; set `WATCHER_CRUSTDATA_TOKEN` before `python -m overwatch demo` to query live Crustdata company search instead. If Crustdata is unavailable, discovery degrades to the approved vendor list only and says so.
+Use `python -m unittest tests.test_api tests.test_workflow -v` to verify this workflow. `python -m overwatch demo --hackathon` enables the fictional three-node rehearsal API; see [the current API presentation guide](docs/hackathon-demo.md).
+
+Provider discovery uses a keyless fixture by default. Set `WATCHER_CRUSTDATA_TOKEN` in the backend environment for live Crustdata searches. Discovery leads remain indicative; qualification and deterministic bid comparison are separate checks.
 
 ## Onboarding rehearsal
 
@@ -60,31 +51,27 @@ blocked. See [phase-by-phase status and walkthrough](docs/onboarding-status.md).
 
 The **Tenders** view includes a server-side LLM assistant that drafts maintenance messages, approval-request summaries and provider/tender searches. It is the dashboard-native LLM path, distinct from the MCP servers (which expose tools to Claude Code as an external client). It runs a provider-neutral tool-use loop with three **read/draft-only** tools (`discover_providers`, `get_case_evidence`, `get_recent_tenders`); it cannot approve, send or execute — those stay on the authenticated policy/broker path — and it is instructed to use only figures returned by the tools (receipts, case facts), never invented numbers.
 
-The provider is chosen from the environment — Zhipu AI first, then Claude, else an offline stub:
+The backend uses **Gemini** through Google's native REST API:
 
 ```powershell
-# Option A — Zhipu AI / GLM (no SDK needed; pure stdlib over the OpenAI-compatible API)
-$env:ZHIPU_API_KEY = "..."           # defaults: model glm-4.6, endpoint api.z.ai
-#   ZHIPU_MODEL and ZHIPU_BASE_URL override (set ZHIPU_BASE_URL to the
-#   open.bigmodel.cn endpoint for the China platform)
-
-# Option B — Claude (official anthropic SDK, lazily imported)
-pip install "watchermcp[assist]"     # or: pip install anthropic
-$env:ANTHROPIC_API_KEY = "sk-ant-..."  # model claude-opus-5-5
-
+$env:GEMINI_API_KEY = "your-key"
+$env:GEMINI_MODEL = "gemini-3.8-flash" # optional override
 python -m overwatch demo
 ```
 
-Without any key the assistant runs in an offline stub so the endpoint still responds; the live tool-calling loop needs a key. Zhipu requires no extra install (stdlib `urllib`); only the Claude path needs the `anthropic` SDK, imported lazily, so the app, demo and default tests keep running with no dependency installed.
+Connect an operator or procurement token in Onboarding, then open **Tenders → Gemini drafting assistant**. Without `GEMINI_API_KEY`, responses are explicitly labeled offline stubs. No provider SDK is required. The adapter preserves Gemini function-call thought signatures and IDs. Drafts are unverified model output; check claims against the returned evidence. See [Gemini setup and contracts](docs/gemini.md). `.env.example` lists server variables; the application does not automatically read `.env` files. Never place provider keys in the frontend.
 
 ## Test-driven implementation
 
 ```powershell
 python -m unittest discover -s tests -v
+python -m unittest discover -s deploy -p "test_*.py" -v
 python -m compileall -q overwatch
+npm test
+npm run build
 ```
 
-Node is needed only for the optional JavaScript syntax check. Three DMTF integration tests are skipped unless their environment variables are set. The main tests run real local HTTP servers and require permission to use loopback sockets.
+Node builds and tests the frontend. Three DMTF integration tests are skipped unless their environment variables are set. The main tests run real local HTTP servers and require permission to use loopback sockets.
 
 The suite covers:
 
@@ -94,12 +81,12 @@ The suite covers:
 - Atomic single-use permits, budget reservation, ambiguous outcomes and restart reconciliation.
 - False action success, pre-action observations, interrupted soak periods and verified recovery.
 - Exact decimal bid totals, qualification gates, quote expiry, currencies and equivalent quantity/scope.
-- API authentication, origin/host checks, role spoofing and end-to-end HTTP operation.
+- API authentication, loopback host checks, CORS, role spoofing and end-to-end HTTP operation.
 - MCP lifecycle, zone-specific read-only tools and architectural dependency boundaries.
 
 See [verification protocol](docs/verification.md) for the release gates and [TDD record](docs/tdd-record.md) for the red/green development sequence.
 
-An optional real-browser smoke runner is provided in `scripts/ui-smoke.cjs`. Install Playwright and its browser in your development environment, then run `node scripts/ui-smoke.cjs`. `PLAYWRIGHT_MODULE` can point to an existing package and `PLAYWRIGHT_CHANNEL=msedge` selects an installed Edge browser. The runner launches/stops its own local app, checks the full workflow and tender UI, and saves screenshots and a report under ignored `artifacts/`.
+An optional real-browser smoke runner is provided in `scripts/frontend-smoke.cjs`. Install Playwright and its browser in your development environment, then run `node scripts/frontend-smoke.cjs`. `PLAYWRIGHT_MODULE` can point to an existing package and `PLAYWRIGHT_CHANNEL=msedge` selects an installed Edge browser. The runner launches/stops its own local app, checks the built dashboard, live API connection and offline Gemini draft flow, and saves screenshots and a report under ignored `artifacts/`.
 
 ## Actual DMTF Mockup Server
 
@@ -149,7 +136,7 @@ Set the client's working directory to this checkout, or install this project int
 | Records | `records.get_cases`, `records.get_plans` |
 | Market | `market.get_tenders` (simulation comparisons only) |
 
-These are a minimal MCP 2025-06-18 stdio implementation. Tools return at most the latest 100 matching records. There are no model-accessible approval, signing, policy-update or execution tools. The broker is invoked by the authenticated workflow/API path. No LLM provider is called or billed; a connected model may use the read tools for analysis, while plans in this release use deterministic templates.
+These are a minimal MCP 2025-06-18 stdio implementation. Tools return at most the latest 100 matching records. There are no model-accessible approval, signing, policy-update or execution tools. The broker is invoked by the authenticated workflow/API path. These MCP processes do not call or bill an LLM provider (the separate Gemini assistant can); a connected model may use the read tools for analysis, while plans in this release use deterministic templates.
 
 ## Repository layout
 
@@ -160,19 +147,26 @@ overwatch/
   store.py         SQLite transactions and hash-chained events
   redfish.py       Link-following collector and simulation-only action adapter
   simulator.py     Stateful local Redfish scenarios and action outcomes
-  api.py           Authenticated loopback API and UI hosting
+  api.py           Authenticated loopback backend API
   mcp.py           Read-only stdio tools split by trust zone
   tender.py        Deterministic bid eligibility and comparison
-  assist.py        Dashboard LLM assistant (Zhipu/GLM or Claude); read/draft-only tools
+  assist.py        Bounded Gemini drafting loop; read/draft-only tools
+  gemini.py        Native Gemini REST transport and function-call translation
   discovery.py     Crustdata provider discovery (live client + keyless fixture), compliance screen
   scoring.py       Weighted qualification rubric; unverified factors score zero
-  web/             Operations desk
+frontend/          NOC dashboard, Gemini draft panel and static build tooling
 tests/             Behavioral, HTTP, MCP, architecture and upstream tests
 integrations/dmtf/ Pinned upstream manifest, dependency lock and Docker recipe
 docs/              Architecture, verification, limitations and decisions
 examples/          MCP and tender inputs
 .github/workflows/ Windows/Linux tests and upstream integration CI
 ```
+
+## Frontend deployment
+
+Run `npm ci` and `npm run build`; publish **frontend/dist/**. Root `package.json`, lockfile, Netlify and Vercel configuration support deploying from the repository root. `npm run preview` serves the built output locally. Tailwind is compiled during the build; production does not load its CDN script.
+
+Deploying static files does not deploy the Python API or provision model credentials. A hosted dashboard needs a separately deployed HTTPS API with production authentication and a restricted CORS policy; the bundled loopback demo server is a development service. See [frontend deployment instructions](frontend/README.md) and [parallel work ownership](docs/parallel-work.md).
 
 ## Production boundary
 

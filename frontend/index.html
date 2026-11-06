@@ -643,6 +643,20 @@
 
         <!-- TAB 3: 6-FACTOR PROCUREMENT TENDER RUBRIC -->
         <div id="tab-panel-tender" class="hidden space-y-3">
+          <section class="noc-card p-3 space-y-2" aria-labelledby="gemini-heading">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <h3 id="gemini-heading" class="text-xs font-bold uppercase tracking-wider text-sky-300">Gemini drafting assistant</h3>
+              <span id="assist-status" class="text-[11px] text-slate-400">Backend connection required · drafts only</span>
+            </div>
+            <p class="text-[11px] text-slate-400">Connect an operator or procurement role token in Onboarding. The Gemini key stays on the backend. Review all prose against the attached evidence before acting.</p>
+            <form id="assist-form" class="space-y-2">
+              <label for="assist-prompt" class="block text-xs text-slate-300">Request a maintenance summary or provider search</label>
+              <textarea id="assist-prompt" maxlength="16000" rows="3" required class="w-full bg-slate-900/70 border border-slate-700 rounded px-2 py-2 text-xs text-white" placeholder="Find maintenance providers and explain which qualification evidence is still needed."></textarea>
+              <button id="assist-submit" type="submit" class="px-3 py-1.5 rounded text-xs font-semibold bg-sky-500/20 hover:bg-sky-500/35 text-sky-300 border border-sky-500/40">Draft with Gemini</button>
+            </form>
+            <pre id="assist-reply" class="text-xs text-slate-200 whitespace-pre-wrap break-words" aria-live="polite"></pre>
+            <details id="assist-evidence" class="hidden text-xs text-slate-400"><summary>Tool evidence used for this draft</summary><pre id="assist-evidence-body" class="whitespace-pre-wrap break-words mt-2"></pre></details>
+          </section>
           <div class="noc-card p-3">
             <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
               <div>
@@ -1882,6 +1896,33 @@
         });
       }
 
+      function wireAssistant() {
+        obEl("assist-form").addEventListener("submit", async event => {
+          event.preventDefault();
+          const button = obEl("assist-submit");
+          if (button.disabled) return;
+          const prompt = obEl("assist-prompt").value.trim();
+          if (!prompt) return;
+          if (!obCfg().token) {
+            obEl("assist-status").textContent = "Connect an operator or procurement token in Onboarding first.";
+            return;
+          }
+          button.disabled = true;
+          obEl("assist-status").textContent = "Drafting from backend evidence…";
+          obEl("assist-reply").textContent = "";
+          obEl("assist-evidence").classList.add("hidden");
+          try {
+            const result = await obApi("/api/assist", "POST", { prompt, task: "operator_draft" });
+            obEl("assist-status").textContent = (result.model === "stub" ? "Offline stub — configure GEMINI_API_KEY on the backend" : result.model + " · unverified draft for review");
+            obEl("assist-reply").textContent = result.reply || "No final draft was produced within the tool-call limit.";
+            obEl("assist-evidence-body").textContent = JSON.stringify(result.evidence || [], null, 2);
+            obEl("assist-evidence").classList.toggle("hidden", !(result.evidence || []).length);
+          } catch (error) {
+            obEl("assist-status").textContent = "Draft unavailable: " + error.message;
+          } finally { button.disabled = false; }
+        });
+      }
+
       function switchTab(tabId) {
         state.activeTab = tabId;
         ["overview", "lifecycle", "tender", "mcp", "audit", "onboarding"].forEach(t => {
@@ -1974,7 +2015,6 @@
           state.role = modalRolePicker.value;
           roleSelect.value = state.role;
           state.token = document.getElementById("token").value.trim() || "demo-token";
-          document.getElementById("main-panel").classList.remove("hidden");
           closeLoginModal();
           addAuditEvent("shift_login", "Operator authenticated for start-of-day shift as '" + state.role + "'");
           renderSelectedNodeDrilldown();
@@ -2105,6 +2145,7 @@
         invokeMcpTool("fleet.get_observations");
         initEvents();
         wireOnboarding();
+        wireAssistant();
         updateClock();
         setInterval(updateClock, 2000);
         setTimeout(renderAllCharts, 60);

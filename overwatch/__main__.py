@@ -47,7 +47,7 @@ def credentials(directory):
 def main():
     parser = argparse.ArgumentParser(description="WatcherMCP evidence-first hardware operations lab")
     sub = parser.add_subparsers(dest="command", required=True)
-    demo = sub.add_parser("demo", help="Run the local simulator, API and dashboard")
+    demo = sub.add_parser("demo", help="Run the local simulator and backend API; start frontend separately")
     demo.add_argument("--port", type=int, default=8080)
     demo.add_argument("--lab-port", type=int, default=8001)
     demo.add_argument("--data", type=Path, default=Path("data"))
@@ -103,7 +103,7 @@ def main():
             # with real captured third-party-maintainer records, so the demo needs no account.
             token = os.environ.get("WATCHER_CRUSTDATA_TOKEN")
             discovery = CrustdataClient(token) if token else FixtureDiscoveryClient()
-            # Dashboard-native LLM: Zhipu (ZHIPU_API_KEY) or Claude (ANTHROPIC_API_KEY),
+            # Dashboard-native LLM: Gemini (GEMINI_API_KEY),
             # else an offline stub so the demo and endpoint still work with no key.
             assistant = Assistant(app, client=choose_assist_client(), discovery=discovery)
             # In-flight actions survive application restarts; simulator restarts do not recreate lost remote outcomes.
@@ -114,7 +114,7 @@ def main():
             print("Point the dashboard frontend (frontend/) at this URL as its API base and connect "
                   "with a role token from the credentials file. Ctrl+C stops both services.", flush=True)
             if hackathon:
-                print("HACKATHON: use Enter hackathon demo; all enterprise people/data are fictional. Recovery uses three samples with a zero-second soak.", flush=True)
+                print("HACKATHON API enabled; see docs/hackathon-demo.md. Enterprise people/data are fictional. Recovery uses three samples with a zero-second soak.", flush=True)
         while True:
             time.sleep(0.5)
     except KeyboardInterrupt:

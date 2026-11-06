@@ -11,25 +11,18 @@ tools to Claude Code as an external client). The safety boundary is unchanged:
     back from the tools (receipts, case facts) and are returned to the caller alongside
     the draft so the dashboard can show the evidence the text is built on.
 
-The loop is provider-neutral: a client only implements ``complete(system, messages,
-tools)`` over the internal block format. Two live providers ship - Claude (official
-Anthropic SDK, lazily imported) and Zhipu AI / GLM (OpenAI-compatible REST over stdlib
-urllib, no SDK). ``choose_assist_client`` selects one from the environment; without any
-key the endpoint runs a stub. The app, demo and default tests keep the repo's
-stdlib-only, no-API-key invariant, and the real tool-calling loop is exercised by the
-tests' scripted and fake-transport clients.
+Gemini is the server-side provider, using its native REST function-calling API.
+Without GEMINI_API_KEY the endpoint returns an explicitly offline stub. Gemini
+output is unverified draft prose, never a permit or authoritative evidence.
+The default app/tests need no model SDK and make no paid calls.
 """
 import json
 import os
-import urllib.error
-import urllib.request
 
 from .discovery import discover_providers
 from .errors import Rejected
+from .gemini import GeminiClient
 
-MODEL = "claude-opus-5-5"
-ZHIPU_MODEL = "glm-4.6"
-ZHIPU_URL = "https://api.z.ai/api/paas/v4/chat/completions"
 MAX_STEPS = 4
 MAX_TOKENS = 4096
 
@@ -71,129 +64,20 @@ TOOL_NAMES = {tool["name"] for tool in TOOLS}
 
 
 class StubClient:
-    """Offline client used when no ANTHROPIC_API_KEY is configured. No tool calls."""
+    """Offline client used when no GEMINI_API_KEY is configured. No tool calls."""
 
     def complete(self, *, system, messages, tools):
         asked = messages[0]["content"] if messages and isinstance(messages[0]["content"], str) else ""
-        text = ("AI drafting is in offline stub mode: set ANTHROPIC_API_KEY to enable live "
+        text = ("AI drafting is in offline stub mode: set GEMINI_API_KEY to enable live "
                 "drafting with tool calls. Requested: " + asked[:280])
         block = {"type": "text", "text": text}
         return {"stop_reason": "end_turn", "blocks": [block], "assistant_content": [block]}
 
 
-class ClaudeClient:
-    """Live client. The Anthropic SDK is imported lazily to preserve the no-dependency
-    default; a real call needs `pip install anthropic` and ANTHROPIC_API_KEY."""
-
-    def __init__(self, *, model=MODEL, max_tokens=MAX_TOKENS):
-        self.model, self.max_tokens = model, max_tokens
-
-    def complete(self, *, system, messages, tools):
-        try:
-            import anthropic
-        except ImportError as exc:
-            raise Rejected("anthropic SDK not installed; run 'pip install anthropic' for live assist") from exc
-        client = anthropic.Anthropic()  # resolves ANTHROPIC_API_KEY / ant profile
-        response = client.messages.create(model=self.model, max_tokens=self.max_tokens,
-                                          system=system, tools=tools, messages=messages)
-        blocks = []
-        for block in response.content:
-            if block.type == "text":
-                blocks.append({"type": "text", "text": block.text})
-            elif block.type == "tool_use":
-                blocks.append({"type": "tool_use", "id": block.id, "name": block.name, "input": block.input})
-        # Append the SDK blocks unchanged (append-only; preserves any thinking blocks).
-        return {"stop_reason": response.stop_reason, "blocks": blocks, "assistant_content": response.content}
-
-
-class ZhipuClient:
-    """Zhipu AI / GLM via its OpenAI-compatible chat-completions API, over stdlib urllib.
-
-    Needs no SDK. Reads ZHIPU_API_KEY; ZHIPU_BASE_URL and ZHIPU_MODEL override the
-    international defaults (set ZHIPU_BASE_URL to the open.bigmodel.cn endpoint for the
-    China platform). Translates the internal block format to and from OpenAI tool calls.
-    """
-
-    def __init__(self, token, *, url=None, model=None, max_tokens=MAX_TOKENS, timeout=60, opener=None):
-        if not token:
-            raise Rejected("Zhipu API key required")
-        self.token = token
-        self.url = url or os.environ.get("ZHIPU_BASE_URL") or ZHIPU_URL
-        self.model = model or os.environ.get("ZHIPU_MODEL") or ZHIPU_MODEL
-        self.max_tokens, self.timeout = max_tokens, timeout
-        self._opener = opener or urllib.request.urlopen
-
-    @staticmethod
-    def _to_openai(system, messages, tools):
-        out = [{"role": "system", "content": system}]
-        for message in messages:
-            content = message["content"]
-            if message["role"] == "user":
-                if isinstance(content, str):
-                    out.append({"role": "user", "content": content})
-                else:  # tool_result blocks become separate role:"tool" messages
-                    for block in content:
-                        out.append({"role": "tool", "tool_call_id": block["tool_use_id"],
-                                    "content": block["content"]})
-            else:  # assistant: text + tool_use blocks
-                text = "".join(b["text"] for b in content if b.get("type") == "text")
-                calls = [{"id": b["id"], "type": "function",
-                          "function": {"name": b["name"], "arguments": json.dumps(b["input"])}}
-                         for b in content if b.get("type") == "tool_use"]
-                entry = {"role": "assistant", "content": text or None}
-                if calls:
-                    entry["tool_calls"] = calls
-                out.append(entry)
-        functions = [{"type": "function", "function": {"name": t["name"], "description": t["description"],
-                      "parameters": t["input_schema"]}} for t in tools]
-        return out, functions
-
-    def complete(self, *, system, messages, tools):
-        openai_messages, functions = self._to_openai(system, messages, tools)
-        body = json.dumps({"model": self.model, "messages": openai_messages, "tools": functions,
-                           "tool_choice": "auto", "max_tokens": self.max_tokens}).encode()
-        request = urllib.request.Request(self.url, data=body, method="POST", headers={
-            "Content-Type": "application/json", "Authorization": "Bearer " + self.token})
-        try:
-            with self._opener(request, timeout=self.timeout) as response:
-                payload = json.loads(response.read())
-        except urllib.error.HTTPError as exc:
-            detail = ""
-            try:
-                error = json.loads(exc.read()).get("error") or {}
-                detail = " (" + str(error.get("code")) + ": " + str(error.get("message")) + ")"
-            except (ValueError, TypeError, AttributeError):
-                pass
-            exc.close()  # release the wrapped socket (avoids a Windows ResourceWarning)
-            raise Rejected("Zhipu request failed: HTTP " + str(exc.code) + detail) from exc
-        except (urllib.error.URLError, TimeoutError, ValueError, OSError) as exc:
-            raise Rejected("Zhipu request failed: " + str(exc)) from exc
-        choices = payload.get("choices")
-        if not choices:
-            raise Rejected("Zhipu returned no choices")
-        msg = choices[0].get("message", {})
-        blocks = []
-        if msg.get("content"):
-            blocks.append({"type": "text", "text": msg["content"]})
-        for call in msg.get("tool_calls") or []:
-            arguments = call.get("function", {}).get("arguments", "{}")
-            try:
-                parsed = json.loads(arguments) if isinstance(arguments, str) else (arguments or {})
-            except ValueError:
-                parsed = {}
-            blocks.append({"type": "tool_use", "id": call.get("id", "call_0"),
-                           "name": call.get("function", {}).get("name"), "input": parsed})
-        stop_reason = "tool_use" if any(b["type"] == "tool_use" for b in blocks) else "end_turn"
-        return {"stop_reason": stop_reason, "blocks": blocks, "assistant_content": blocks}
-
-
 def choose_assist_client():
-    """Pick a provider from the environment: Zhipu, then Claude, else the offline stub."""
-    if os.environ.get("ZHIPU_API_KEY"):
-        return ZhipuClient(os.environ["ZHIPU_API_KEY"])
-    if os.environ.get("ANTHROPIC_API_KEY"):
-        return ClaudeClient()
-    return StubClient()
+    """Use Gemini when configured, otherwise an explicit offline stub."""
+    key = os.environ.get("GEMINI_API_KEY")
+    return GeminiClient(key) if key else StubClient()
 
 
 class Assistant:
@@ -226,7 +110,7 @@ class Assistant:
             limit = arguments.get("limit", 5)
             if not isinstance(limit, int) or limit <= 0:
                 limit = 5
-            records = self.app.store.list("tenders")[-limit:]
+            records = self.app.store.list("tenders")[-min(limit, 100):]
             return {"tenders": [{"id": t["id"], "kind": t.get("kind"),
                                  "recommendation": t.get("recommendation"),
                                  "lead_count": len(t.get("leads", [])),
@@ -234,8 +118,10 @@ class Assistant:
         raise Rejected("tool not available to the assistant: " + str(name))
 
     def run(self, *, prompt, task=None, identity):
-        if not isinstance(prompt, str) or not prompt.strip():
-            raise Rejected("prompt is required")
+        if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 16000:
+            raise Rejected("prompt must contain between 1 and 16000 characters")
+        if task is not None and (not isinstance(task, str) or len(task) > 200):
+            raise Rejected("task must be a short string")
         system = SYSTEM + (("\n\nCurrent task: " + task) if task else "")
         messages = [{"role": "user", "content": prompt}]
         tools_used, evidence, reply = [], [], ""
@@ -246,13 +132,15 @@ class Assistant:
             calls = [b for b in step["blocks"] if b["type"] == "tool_use"]
             if step["stop_reason"] != "tool_use" or not calls:
                 break
+            if len(calls) > 8:
+                raise Rejected("too many tool calls in one assistant step")
             results = []
             for call in calls:
                 tools_used.append(call["name"])
                 try:
                     output = self._run_tool(call["name"], call["input"], identity)
-                except Rejected as exc:
-                    output = {"error": str(exc)}
+                except (Rejected, KeyError, TypeError, ValueError):
+                    output = {"error": "tool unavailable or invalid arguments"}
                 evidence.append({"tool": call["name"], "output": output})
                 results.append({"type": "tool_result", "tool_use_id": call["id"],
                                 "content": json.dumps(output)})
@@ -261,4 +149,4 @@ class Assistant:
             tx.event("assist_drafted", {"by": identity.get("actor"), "task": task, "tools_used": tools_used},
                      self.app.clock())
         return {"reply": reply, "tools_used": tools_used, "evidence": evidence,
-                "model": getattr(self.client, "model", "stub"), "status": "DRAFT_ONLY"}
+                "model": getattr(self.client, "model", "stub"), "status": "DRAFT_ONLY", "verification": "UNVERIFIED_MODEL_DRAFT"}

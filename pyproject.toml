@@ -12,11 +12,7 @@ requires-python = ">=3.11"
 # required there. No runtime dependency is added on Linux/macOS.
 dependencies = ["tzdata; platform_system == 'Windows'"]
 
-# Core app, demo and default tests use only the standard library. The assist feature's
-# live LLM path is the one optional dependency; it is imported lazily and only needed
-# when ANTHROPIC_API_KEY is configured. Install with: pip install watchermcp[assist]
-[project.optional-dependencies]
-assist = ["anthropic>=0.40"]
+# Gemini uses the native REST API through urllib; no model SDK is required.
 
 [project.scripts]
 watchermcp = "overwatch.__main__:main"

@@ -12,4 +12,9 @@ The repository started empty. Tests were added before the corresponding implemen
 8. **Architectural fitness:** dependency/tool-boundary tests protect deterministic policy evaluation and prevent the read-only MCP surface from gaining approval/execution capabilities accidentally.
 9. **Audit-integrity red/green:** additional negative tests demonstrated that a recomputed receipt hash must be compared with its original ledger anchor, and that ledger corruption must block execution even for an already issued permit. Both checks now fail closed.
 
+10. **Gemini migration:** scripted REST contracts were added for native function calls, signature/ID preservation, credentials and failure behavior before adding the adapter. Additional malformed candidate/ID cases failed, then passed after response validation was tightened. The assistant retains read/draft-only tools and explicit offline behavior.
+11. **Frontend deployment:** build verification checks local compiled CSS, JavaScript syntax, public output files and absence of a backend key from the build. An Edge smoke test exercises the compiled frontend against an isolated API. A regression assertion reproduced legacy JSON state becoming visible after login; removing the obsolete unhide action fixed it.
+
+Local integration verification on 2026-11-06: 137 Python tests (including three actual pinned DMTF tests), nine deployment gateway tests, npm installation/build test, production build and the Edge frontend smoke. Live Gemini calls and physical hardware were not exercised.
+
 This records the observed development sequence, not a certification. Current CI results and the reproducible test suite are the release evidence. Physical hardware behavior and real-world model quality remain separate acceptance gates.
