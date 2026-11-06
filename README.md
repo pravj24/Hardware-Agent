@@ -59,7 +59,7 @@ $env:GEMINI_MODEL = "gemini-3.8-flash" # optional override
 python -m overwatch demo
 ```
 
-Connect an operator or procurement token in Onboarding, then open **Tenders → Gemini drafting assistant**. Without `GEMINI_API_KEY`, responses are explicitly labeled offline stubs. No provider SDK is required. The adapter preserves Gemini function-call thought signatures and IDs. Drafts are unverified model output; check claims against the returned evidence. See [Gemini setup and contracts](docs/gemini.md). `.env.example` lists server variables; the application does not automatically read `.env` files. Never place provider keys in the frontend.
+Connect an operator or procurement token in Onboarding, then open **Tenders → Gemini drafting assistant**. Without `GEMINI_API_KEY`, responses are explicitly labeled offline stubs. No provider SDK is required. The adapter preserves Gemini function-call thought signatures and IDs. Drafts are unverified model output; check claims against the returned evidence. See [Gemini setup and contracts](docs/gemini.md). You can copy `.env.example` to an ignored `.env` file; demo startup loads its backend variables without overriding existing environment values. Never place provider keys in the frontend.
 
 ## Test-driven implementation
 

@@ -9,6 +9,7 @@ import time
 
 from .api import APIServer
 from .assist import Assistant, choose_assist_client
+from .config import load_backend_env
 from .discovery import CrustdataClient, FixtureDiscoveryClient
 from .mcp import MCPServer
 from .redfish import RedfishClient, SimulationAdapter
@@ -69,6 +70,11 @@ def main():
     audit = sub.add_parser("audit", help="Verify the local ledger hash chain")
     audit.add_argument("--db", type=Path, default=Path("data/overwatch.db"))
     args = parser.parse_args()
+    if args.command == "demo":
+        try:
+            load_backend_env()
+        except (OSError, UnicodeError, ValueError):
+            parser.error("Cannot load backend .env; check permissions and KEY=value syntax")
     if args.command in {"mcp", "audit"}:
         if not args.db.exists():
             parser.error("database not found; run demo or collect first")

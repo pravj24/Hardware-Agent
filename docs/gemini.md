@@ -1,6 +1,8 @@
 # Gemini integration
 
-The backend uses Google's native `generateContent` REST API. Set `GEMINI_API_KEY` in the backend environment, optionally override `GEMINI_MODEL` (default `gemini-3.8-flash`), then start `python -m overwatch demo`. No provider SDK is required. `.env.example` documents the variables; the application does not automatically load `.env` files.
+The backend uses Google's native `generateContent` REST API. Set `GEMINI_API_KEY` in the backend environment, optionally override `GEMINI_MODEL` (default `gemini-3.8-flash`), then start `python -m overwatch demo`. No provider SDK is required. Alternatively, copy `.env.example` to `.env` in the working directory and fill in the key locally. Demo startup loads only the supported backend variables; existing environment values take precedence, including explicitly empty values. Quotes are optional; values are literal, with no shell expansion or interpolation. `.env` stays ignored by Git.
+
+GitHub stores the key under the Actions repository secret `GEMINI_API_KEY`. A deployment workflow must explicitly pass that secret into the Python service's runtime environment; GitHub does not automatically configure a separately hosted backend. Ordinary test/frontend build jobs do not receive it and make no paid calls. Never place the value directly in workflow YAML or frontend build variables. To replace the key, update the repository secret and local `.env` separately.
 
 Run the frontend separately with `npm ci` and `npm run dev`. In Onboarding, connect the backend URL with an operator or procurement role token. Open Tenders and use the Gemini drafting panel. Without a key the backend explicitly returns an offline stub. Provider keys never belong in browser settings, frontend environment variables or deployment artifacts.
 
