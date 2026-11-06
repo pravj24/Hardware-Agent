@@ -1,0 +1,27 @@
+{
+  "name": "watchermcp",
+  "version": "0.1.0",
+  "description": "Read Hardware Overwatch telemetry receipts, cases, plans and tender records through three isolated MCP trust zones.",
+  "author": {
+    "name": "WatcherMCP",
+    "url": "https://github.com/pravj24/WatcherMCP"
+  },
+  "homepage": "https://github.com/pravj24/WatcherMCP",
+  "repository": "https://github.com/pravj24/WatcherMCP",
+  "keywords": ["mcp", "hardware", "redfish", "observability", "read-only"],
+  "mcpServers": "./.mcp.codex.json",
+  "interface": {
+    "displayName": "WatcherMCP",
+    "shortDescription": "Read hardware telemetry, cases and tender evidence",
+    "longDescription": "Analyze the local Hardware Overwatch evidence store through separate fleet, records and market MCP servers. Tools are read-only and cannot approve plans, issue permits or execute hardware actions. Requires Python 3.11+, the installed watchermcp package and an existing database.",
+    "developerName": "WatcherMCP",
+    "category": "Developer Tools",
+    "capabilities": ["Read"],
+    "websiteURL": "https://github.com/pravj24/WatcherMCP",
+    "defaultPrompt": [
+      "Summarize the latest hardware telemetry and cite the receipt IDs.",
+      "Review open hardware cases and their proposed maintenance plans.",
+      "Summarize the recorded simulation tender comparisons and missing qualification evidence."
+    ]
+  }
+}

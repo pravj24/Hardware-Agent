@@ -129,6 +129,10 @@ The tests start and stop the upstream server, check its revision and collector c
 
 ## MCP tools
 
+For Codex or Claude Code, install the [WatcherMCP plugin](plugin/README.md) to add
+all three read-only trust zones. The plugin guide includes local/GitHub marketplace
+installation, Python setup and database configuration.
+
 Start the demo or collect once to create the database, then configure your MCP client to run separate stdio processes:
 
 ```text

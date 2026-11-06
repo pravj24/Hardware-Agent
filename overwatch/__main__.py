@@ -58,7 +58,9 @@ def main():
     mock.add_argument("--data", type=Path, default=Path("data"))
     mcp = sub.add_parser("mcp", help="Run a read-only MCP stdio server")
     mcp.add_argument("--zone", choices=["fleet", "records", "market"], required=True)
-    mcp.add_argument("--db", type=Path, default=Path("data/overwatch.db"))
+    mcp.add_argument("--db", type=Path,
+                     default=Path(os.environ.get("WATCHER_MCP_DB") or "data/overwatch.db"),
+                     help="Evidence database (default: WATCHER_MCP_DB or data/overwatch.db)")
     collect = sub.add_parser("collect", help="Read one Redfish endpoint; never executes actions")
     collect.add_argument("--url", required=True)
     collect.add_argument("--environment", choices=["simulation", "production"], default="simulation")
