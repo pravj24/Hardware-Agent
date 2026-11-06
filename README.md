@@ -181,3 +181,10 @@ python -m overwatch collect --url https://your-authorized-bmc --environment prod
 ```
 
 An optional `WATCHER_REDFISH_AUTHORIZATION` environment variable supplies an authorization header, and `--ca-file` accepts a customer CA. The collector does not log the header. Production and simulation databases are deliberately incompatible. This release rejects execution plans in production mode.
+
+## Team Members and Emails: 
+
+1. Krishna Khetre: krishnakd24@iitk.ac.in
+2. Praval Jiddu: praval24@iitk.ac.in
+3. Saigourav Sahoo: saigourav24@iitk.ac.in
+4. Vaibhav Kalyan: vkalyan24@iitk.ac.in
